@@ -1,4 +1,4 @@
-# Map'A'Droid
+# Map'A'Droid crhbetz repo
 
 ![Python 3.6](https://img.shields.io/badge/python-3.6-blue.svg)
 ![Python 3.7](https://img.shields.io/badge/python-3.7-blue.svg)
@@ -10,6 +10,12 @@
 ![MAD-Banner](https://maddev.eu/wp-content/uploads/2020/01/banner_small_web.png)
 
 Map'A'Droid is a scanner for PoGo based on Android devices.
+
+This repo contains a couple of feature branches that didn't make it to the main project. They are merged to `master` when I use them. I try to keep master and feature branches synced with upstream updates as good as I can. Sometimes I cherry-pick minor features or fixes from upstream dev into my master.
+
+Besides that, I also track personal customizations for my setup here in the `pogoan*` branches.
+
+**Do not report issues to the MAD devs if you're running any modifications from here!**
 
 ## Information
 
