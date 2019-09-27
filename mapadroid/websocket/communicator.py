@@ -3,6 +3,7 @@ from typing import Optional
 
 from mapadroid.utils.CustomTypes import MessageTyping
 from mapadroid.utils.collections import Location
+import time
 from mapadroid.utils.geo import get_distance_of_two_points_in_meters
 from mapadroid.utils.logging import logger
 from mapadroid.utils.madGlobals import ScreenshotType, WebsocketWorkerConnectionClosedException, \
@@ -200,3 +201,8 @@ class Communicator(AbstractCommunicator):
                                                                             location_to.lat, location_to.lng,
                                                                             speed),
                                        self.__command_timeout + seconds_traveltime)
+
+    def forceBlock(self, duration):
+        self.__sendMutex.acquire()
+        time.sleep(duration)
+        self.__sendMutex.release()
