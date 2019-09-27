@@ -368,6 +368,28 @@ class WebsocketServer(object):
                 if entry is not None and entry.worker_instance is not None
                 else False)
 
+    def dict_workers(self):
+        workerDict = {}
+        i=0
+        for id, worker in self.__current_users.items():
+            workerDict[str(i)] = id
+            i+=1
+        return workerDict
+
+    def list_workers(self):
+        workerList = []
+        for id, worker in self.__current_users.items():
+            entry = self.__current_users.get(id, None)
+            if not entry:
+#                logger.warning("Listing worker {} for commandSocket with entry {}".format(id, entry))
+                continue
+            elif not entry.worker_thread.is_alive():
+#                logger.warning("Listing worker {} for commandSocket with worker_thread not alive".format(id))
+                continue
+            else:
+                workerList.append(id)
+        return workerList
+
     def trigger_worker_check_research(self, origin: str) -> bool:
         entry: Optional[WebsocketConnectedClientEntry] = self.__current_users.get(origin, None)
         trigger_research: bool = entry is not None and entry.worker_instance is not None

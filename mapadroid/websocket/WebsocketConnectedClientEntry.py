@@ -94,8 +94,8 @@ class WebsocketConnectedClientEntry:
             logger.warning("Timeout, increasing timeout-counter of {}", self.origin)
             self.fail_counter += 1
             if self.fail_counter > 5:
-                logger.error("5 consecutive timeouts to {} or origin is not longer connected, cleanup",
-                             self.origin)
+                logger.error("5 consecutive timeouts to {} or origin is not longer connected, cleanup (counter at {})",
+                             self.origin, self.fail_counter)
                 raise WebsocketWorkerTimeoutException
         finally:
             logger.debug("Cleaning up received messaged of {}.", self.origin)

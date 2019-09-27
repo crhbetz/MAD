@@ -32,13 +32,13 @@ from mapadroid.utils.walkerArgs import parseArgs
 from mapadroid.websocket.WebsocketServer import WebsocketServer
 from mapadroid.utils.updater import deviceUpdater
 from mapadroid.data_manager import DataManager
+from mapadroid.command_socket.commandSocket import CommandSocket
 
 import unittest
 
 args = parseArgs()
 os.environ['LANGUAGE'] = args.language
 initLogging(args)
-
 
 # Patch to make exceptions in threads cause an exception.
 def install_thread_excepthook():
@@ -264,6 +264,13 @@ if __name__ == "__main__":
                                 jobstatus))
         t_madmin.daemon = True
         t_madmin.start()
+
+    if args.commandsocket:
+        logger.info('Starting commandSocket Thread...')
+        commandsocket = CommandSocket(ws_server, args)
+        commandsocketThread = Thread(name="commandsocket", target=commandsocket.run,)
+        commandsocketThread.daemon = True
+        commandsocketThread.start()
 
     logger.info("Running.....")
     exit_code = 0

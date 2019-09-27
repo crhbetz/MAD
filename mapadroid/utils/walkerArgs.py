@@ -68,6 +68,14 @@ def parseArgs():
     parser.add_argument('-wsct', '--websocket_command_timeout', required=False, type=int, default=30,
                         help='The max time to wait for a command to return (in seconds). Default: 30 seconds.')
 
+    # Command Socket
+    parser.add_argument('-cs', '--commandsocket', action='store_true', default=False,
+                        help='Enable commandSocket functionality.')
+    parser.add_argument('-csip', '--commandsocket_ip', required=False, default="127.0.0.1", type=str,
+                        help='IP to listen on for commandSocket connections. Default: 127.0.0.1 (localhost only).')
+    parser.add_argument('-csport', '--commandsocket_port', required=False, default=8090, type=int,
+                        help='Port to listen on for commandSocket connections. Default: 8090.')
+
     # Walk Settings
     parser.add_argument('-psd', '--post_screenshot_delay', required=False, type=float, default=0.2,
                         help=(
