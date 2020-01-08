@@ -129,7 +129,7 @@ class ClusteringHelper:
             return event, [event]
         # use the get_farthest... since we have previously moved the middle, we need to check for matching events in
         # such cases and build new circle events in time
-        if len(event) == 4 and event[3]:
+        if len(event) > 3 and event[3]:
             # this is a previously clustered event, we will simply check for other events that have not been clustered
             # to include those in our current circle
             # all we need to do is update timestamps to keep track as to whether we are still inside the max_timedelta
@@ -159,7 +159,7 @@ class ClusteringHelper:
                                                                   earliest_timestamp, latest_timestamp,
                                                                   max_radius)
         middle_event = (latest_timestamp, middle_event[1],
-                        highest_timedelta, middle_event[3])
+                        highest_timedelta, middle_event[3], count_inside)
         if count_inside <= self.max_count_per_circle and count_inside == len(to_be_inspected):
             return middle_event, events_in_circle
         elif count_inside > self.max_count_per_circle:

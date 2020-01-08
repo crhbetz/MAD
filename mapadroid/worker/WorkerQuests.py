@@ -52,6 +52,9 @@ class WorkerQuests(MITMBase):
     def similar(self, elem_a, elem_b):
         return SequenceMatcher(None, elem_a, elem_b).ratio()
 
+    def _move_around(self):
+        pass
+
     def __init__(self, args, dev_id, origin, last_known_state, communicator: AbstractCommunicator,
                  mapping_manager: MappingManager,
                  area_id: int, routemanager_name: str, db_wrapper: DbWrapper,

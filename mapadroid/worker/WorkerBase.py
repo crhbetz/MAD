@@ -72,6 +72,7 @@ class WorkerBase(AbstractWorker):
 
         self.current_location = Location(0.0, 0.0)
         self.last_location = self.get_devicesettings_value("last_location", None)
+        self.wait_again = 0
 
         if self.last_location is None:
             self.last_location = Location(0.0, 0.0)
@@ -154,6 +155,13 @@ class WorkerBase(AbstractWorker):
         Override to run stuff like update injections settings in MITM worker
         Runs before walk/teleport to the location previously grabbed
         :return:
+        """
+        pass
+
+    @abstractmethod
+    def _move_around(self):
+        """
+        move around
         """
         pass
 
@@ -431,12 +439,18 @@ class WorkerBase(AbstractWorker):
                         self.current_location.lat, self.current_location.lng, time_snapshot)
                     )
 
-                try:
-                    self._post_move_location_routine(time_snapshot)
-                except (InternalStopWorkerException, WebsocketWorkerRemovedException, WebsocketWorkerTimeoutException,
-                        WebsocketWorkerConnectionClosedException):
-                    self.logger.warning("Worker failed running post_move_location_routine, stopping worker")
-                    break
+                while self.wait_again > 0:
+                    self.logger.info("{} successful GMO required at this position", self.wait_again)
+                    try:
+                        self._post_move_location_routine(time_snapshot)
+                        self.wait_again = self.wait_again - 1
+                        time_snapshot = time.time()
+                        if self.wait_again > 0:
+                            self._move_around()
+                    except (InternalStopWorkerException, WebsocketWorkerRemovedException, 
+                            WebsocketWorkerTimeoutException, WebsocketWorkerConnectionClosedException):
+                        self.logger.warning("Worker failed running post_move_location_routine, stopping worker")
+                        break
                 self.logger.info("Worker finished iteration, continuing work")
 
         self._internal_cleanup()
@@ -543,8 +557,14 @@ class WorkerBase(AbstractWorker):
 
         self._check_for_mad_job()
 
-        self.current_location = self._mapping_manager.routemanager_get_next_location(self._routemanager_name,
-                                                                                     self._origin)
+        next_location = self._mapping_manager.routemanager_get_next_location(self._routemanager_name,
+                                                                             self._origin)
+        if next_location and not isinstance(next_location[0], float):
+            self.current_location = next_location[0]
+            self.wait_again = next_location[1]
+        else:
+            self.current_location = next_location
+            self.wait_again = 1
         return self._mapping_manager.routemanager_get_settings(self._routemanager_name)
 
     def _check_for_mad_job(self):
