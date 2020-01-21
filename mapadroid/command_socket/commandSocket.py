@@ -1,7 +1,7 @@
 import logging
 import socket
 from threading import Thread
-from command_socket.commandSocketSession import CommandSocketSession
+from mapadroid.command_socket.commandSocketSession import CommandSocketSession
 from loguru import logger
 
 
