@@ -61,16 +61,15 @@ class WorkerMITM(MITMBase):
                                                            self.current_location.lat) + lat_offset,
                                                        float(self.current_location.lng) + lng_offset)
         logger.info("Walking roughly: {}", str(to_walk))
-        self._communicator.walkFromTo(self.current_location.lat,
-                                      self.current_location.lng,
-                                      self.current_location.lat + lat_offset,
-                                      self.current_location.lng + lng_offset,
-                                      50)
-        self._communicator.walkFromTo(self.current_location.lat,
-                                      self.current_location.lng,
-                                      self.current_location.lat - lat_offset,
-                                      self.current_location.lng + lng_offset,
-                                      50)
+        self._communicator.walk_from_to(Location(self.current_location.lat + lat_offset,
+                                        self.current_location.lng + lng_offset),
+                                        self.current_location,
+                                        50)
+
+        self._communicator.walk_from_to(Location(self.current_location.lat - lat_offset,
+                                        self.current_location.lng + lng_offset),
+                                        self.current_location,
+                                        50)
 
         logger.debug("Done moving around")
 
