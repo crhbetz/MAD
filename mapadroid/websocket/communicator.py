@@ -73,6 +73,12 @@ class Communicator(AbstractCommunicator):
                                                              self.worker_instance_ref)
         return response
 
+    def send_and_wait(self, message: MessageTyping, timeout: float = None) -> Optional[MessageTyping]:
+        with self.__sendMutex:
+            timeout = self.__command_timeout if timeout is None else timeout
+            return self.websocket_client_entry.send_and_wait(message, timeout=timeout,
+                                                             worker_instance=self.worker_instance_ref)
+
     def reboot(self) -> bool:
         return self.__runAndOk("more reboot now\r\n", self.__command_timeout)
 
@@ -202,7 +208,3 @@ class Communicator(AbstractCommunicator):
                                                                             speed),
                                        self.__command_timeout + seconds_traveltime)
 
-    def forceBlock(self, duration):
-        self.__sendMutex.acquire()
-        time.sleep(duration)
-        self.__sendMutex.release()

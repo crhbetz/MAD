@@ -82,6 +82,17 @@ class CommandSocketSession(object):
             self.client.close()
         sys.exit(0)
 
+    def block_worker(self, communicator, device, duration):
+        logger.info("Block worker {} with MADmin sleeptime".format(device))
+        self.ws_server.set_geofix_sleeptime_worker(device, duration)
+
+    def stop_device(self, device, reply=False):
+        logger.info("try to stop worker {}".format(device))
+        if reply:
+            self.send_message("Will try to stop worker - return to device selection")
+        self.ws_server.force_disconnect(device)
+        worker = False
+
     def run(self):
         logger.debug("New connection from {}".format(self.address))
         worker = False
@@ -89,15 +100,14 @@ class CommandSocketSession(object):
         if command and self._is_good_json(command):
             command = json.loads(command)
             if command['device'] in self.ws_server.list_workers():
-                workerRef = self.ws_current_users.get(command["device"], None)[1]
-                logger.debug("ref: {}".format(workerRef))
+                communicator = self.ws_server.get_origin_communicator(command["device"])
+                logger.debug("communicator: {}".format(communicator))
                 if command["command"] == "block":
-                    logger.info("try to block worker {}".format(command["device"]))
-                    workerRef._communicator.forceBlock(60)
-                    logger.info("worker {} block released.".format(command["device"]))
+                    self.block_worker(communicator, command["device"], 60)
+                elif command["command"] == "stop":
+                    self.stop_device(command["device"])
                 else:
-                    result = self.ws_server.send_and_wait(command["device"], workerRef,
-                                                          command["command"], 30)
+                    result = communicator.send_and_wait(command["command"], timeout=30)
                     logger.debug("Command {} on worker {} resulted in: {}"
                         .format(command["command"], command["device"], result))
                     logger.debug("Command {} on device {} finished."
@@ -128,8 +138,8 @@ class CommandSocketSession(object):
                 response = self.wait_for_message()
                 if response in availableWorkers:
                     worker = availableWorkers[response]
-                    workerRef = self.ws_current_users.get(worker, None)[1]
-                    logger.debug("ref: {}".format(workerRef))
+                    communicator = self.ws_server.get_origin_communicator(worker)
+                    logger.debug("communicator: {}".format(communicator))
             while worker:
                 logger.debug("Using worker {}".format(worker))
                 self.send_message("You chose {}. Now send command (return to choose another device, exit to exit)".format(worker))
@@ -140,18 +150,12 @@ class CommandSocketSession(object):
                     worker = False
                     break
                 elif command == "block":
-                    logger.info("try to block worker {}".format(worker))
-                    workerRef._communicator.forceBlock(60)
-                    logger.info("worker {} block released.".format(worker))
+                    self.block_worker(communicator, worker, 60)
                     continue
                 elif command == "stop":
-                    logger.info("try to stop worker {}".format(worker))
-                    self.send_message("Will try to stop worker - return to device selection")
-                    workerRef.stop_worker()
-                    workerRef._internal_cleanup()
-                    worker = False
+                    self.stop_device(worker, reply=True)
                     break
-                result = self.ws_server.send_and_wait(worker, workerRef, command, 30)
+                result = communicator.send_and_wait(command, timeout=30)
                 logger.debug("Command resulted in: {}".format(result))
                 logger.debug("Command {} for device {} finished.".format(command, worker))
 
