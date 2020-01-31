@@ -82,6 +82,18 @@ class CommandSocketSession(object):
             self.client.close()
         sys.exit(0)
 
+    def block_worker(self, communicator, device, duration):
+        logger.info("try to block worker {}".format(device))
+        communicator.forceBlock(duration)
+        logger.info("worker {} block released.".format(device))
+
+    def stop_device(self, device, reply=False):
+        logger.info("try to stop worker {}".format(device))
+        if reply:
+            self.send_message("Will try to stop worker - return to device selection")
+        self.ws_server.force_disconnect(device)
+        worker = False
+
     def run(self):
         logger.debug("New connection from {}".format(self.address))
         worker = False
@@ -92,9 +104,9 @@ class CommandSocketSession(object):
                 communicator = self.ws_server.get_origin_communicator(command["device"])
                 logger.debug("communicator: {}".format(communicator))
                 if command["command"] == "block":
-                    logger.info("try to block worker {}".format(command["device"]))
-                    communicator.forceBlock(60)
-                    logger.info("worker {} block released.".format(command["device"]))
+                    self.block_worker(communicator, command["device"], 60)
+                elif command["command"] == "stop":
+                    self.stop_device(command["device"])
                 else:
                     result = communicator.send_and_wait(command["command"], timeout=30)
                     logger.debug("Command {} on worker {} resulted in: {}"
@@ -139,15 +151,10 @@ class CommandSocketSession(object):
                     worker = False
                     break
                 elif command == "block":
-                    logger.info("try to block worker {}".format(worker))
-                    communicator.forceBlock(60)
-                    logger.info("worker {} block released.".format(worker))
+                    self.block_worker(communicator, worker, 60)
                     continue
                 elif command == "stop":
-                    logger.info("try to stop worker {}".format(worker))
-                    self.send_message("Will try to stop worker - return to device selection")
-                    communicator.terminate_connection()
-                    worker = False
+                    self.stop_device(worker, reply=True)
                     break
                 result = communicator.send_and_wait(command, timeout=30)
                 logger.debug("Command resulted in: {}".format(result))
