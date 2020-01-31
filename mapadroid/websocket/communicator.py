@@ -208,7 +208,3 @@ class Communicator(AbstractCommunicator):
                                                                             speed),
                                        self.__command_timeout + seconds_traveltime)
 
-    def forceBlock(self, duration):
-        self.__sendMutex.acquire()
-        time.sleep(duration)
-        self.__sendMutex.release()

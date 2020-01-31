@@ -83,9 +83,8 @@ class CommandSocketSession(object):
         sys.exit(0)
 
     def block_worker(self, communicator, device, duration):
-        logger.info("try to block worker {}".format(device))
-        communicator.forceBlock(duration)
-        logger.info("worker {} block released.".format(device))
+        logger.info("Block worker {} with MADmin sleeptime".format(device))
+        self.ws_server.set_geofix_sleeptime_worker(device, duration)
 
     def stop_device(self, device, reply=False):
         logger.info("try to stop worker {}".format(device))
