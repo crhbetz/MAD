@@ -439,18 +439,18 @@ class WorkerBase(AbstractWorker):
                         self.current_location.lat, self.current_location.lng, time_snapshot)
                     )
 
-                while self.wait_again > 0:
-                    self.logger.info("{} successful GMO required at this position", self.wait_again)
-                    try:
+                try:
+                    while self.wait_again > 0:
+                        self.logger.info("{} successful GMO required at this position", self.wait_again)
                         self._post_move_location_routine(time_snapshot)
                         self.wait_again = self.wait_again - 1
                         time_snapshot = time.time()
                         if self.wait_again > 0:
                             self._move_around()
-                    except (InternalStopWorkerException, WebsocketWorkerRemovedException, 
-                            WebsocketWorkerTimeoutException, WebsocketWorkerConnectionClosedException):
-                        self.logger.warning("Worker failed running post_move_location_routine, stopping worker")
-                        break
+                except (InternalStopWorkerException, WebsocketWorkerRemovedException, WebsocketWorkerTimeoutException,
+                        WebsocketWorkerConnectionClosedException):
+                    self.logger.warning("Worker failed running post_move_location_routine, stopping worker")
+                    break
                 self.logger.info("Worker finished iteration, continuing work")
 
         self._internal_cleanup()
