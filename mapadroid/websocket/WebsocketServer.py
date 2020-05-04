@@ -381,10 +381,8 @@ class WebsocketServer(object):
         for id, worker in self.__current_users.items():
             entry = self.__current_users.get(id, None)
             if not entry:
-#                logger.warning("Listing worker {} for commandSocket with entry {}".format(id, entry))
                 continue
             elif not entry.worker_thread.is_alive():
-#                logger.warning("Listing worker {} for commandSocket with worker_thread not alive".format(id))
                 continue
             else:
                 workerList.append(id)
