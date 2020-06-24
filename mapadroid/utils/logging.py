@@ -71,15 +71,6 @@ def init_logging(args):
                 "level": log_level_val,
                 "enqueue": True,
                 "filter": filter_errors
-            },
-            {
-                "sink": sys.stderr,
-                "format": log_format_console,
-                "colorize": colorize,
-                "level": "ERROR",
-                "diagnose": log_trace,
-                "backtrace": True,
-                "enqueue": True
             }
         ],
         "extra": {"name": "Unknown"},
@@ -305,3 +296,4 @@ class LogLevelChanger:
             LogLevelChanger.logger.log(level, msg)
         else:
             LogLevelChanger.logger.opt(depth=6).log("DEBUG5", msg)
+
