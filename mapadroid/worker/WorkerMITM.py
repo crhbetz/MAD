@@ -50,7 +50,7 @@ class WorkerMITM(MITMBase):
         walk_distance_post_teleport = 15
 
         # TODO: actually use to_walk for distance
-        logger.debug("moving around")
+        self.logger.debug("moving around")
         lat_offset, lng_offset = get_lat_lng_offsets_by_distance(
             walk_distance_post_teleport)
 
@@ -60,7 +60,7 @@ class WorkerMITM(MITMBase):
                                                        float(
                                                            self.current_location.lat) + lat_offset,
                                                        float(self.current_location.lng) + lng_offset)
-        logger.info("Walking roughly: {}", str(to_walk))
+        self.logger.info("Walking roughly: {}", str(to_walk))
         self._communicator.walk_from_to(Location(self.current_location.lat + lat_offset,
                                         self.current_location.lng + lng_offset),
                                         self.current_location,
@@ -71,7 +71,7 @@ class WorkerMITM(MITMBase):
                                         self.current_location,
                                         50)
 
-        logger.debug("Done moving around")
+        self.logger.debug("Done moving around")
 
 
     def _move_to_location(self):
