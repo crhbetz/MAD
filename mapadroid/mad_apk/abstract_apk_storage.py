@@ -1,36 +1,36 @@
 from abc import ABC, abstractmethod
 from io import BytesIO
 from typing import Optional, NoReturn
-from .apk_enums import APKArch, APKType
-from .custom_types import MADPackages
+from .apk_enums import APK_Arch, APK_Type
+from .custom_types import MAD_Packages
 
 
 class AbstractAPKStorage(ABC):
     @abstractmethod
-    def delete_file(self, package: APKType, architecture: APKArch) -> bool:
+    def delete_file(self, package: APK_Type, architecture: APK_Arch) -> bool:
         """ Remove the package and update the configuration
 
         Args:
-            package (APKType): Package to lookup
-            architecture (APKArch): Architecture of the package to lookup
+            package (APK_Type): Package to lookup
+            architecture (APK_Arch): Architecture of the package to lookup
         """
         pass
 
     @abstractmethod
-    def get_current_version(self, package: APKType, architecture: APKArch) -> Optional[str]:
+    def get_current_version(self, package: APK_Type, architecture: APK_Arch) -> Optional[str]:
         "Get the currently installed version of the package / architecture"
         pass
 
     @abstractmethod
-    def get_current_package_info(self, package: APKType) -> Optional[MADPackages]:
+    def get_current_package_info(self, package: APK_Type) -> Optional[MAD_Packages]:
         """ Get the current information for a given package.  If the package exists in the configuration but not the
             filesystem it will be removed from the configuration
 
         Args:
-            package (APKType): Package to lookup
+            package (APK_Type): Package to lookup
 
         Returns:
-            None if no package is found.  MADPackages if the package lookup is successful
+            None if no package is found.  MAD_Packages if the package lookup is successful
         """
         pass
 
@@ -39,13 +39,17 @@ class AbstractAPKStorage(ABC):
         pass
 
     @abstractmethod
-    def save_file(self, package: APKType, architecture: APKArch, version: str, mimetype: str, data: BytesIO,
+    def reload(self) -> NoReturn:
+        pass
+
+    @abstractmethod
+    def save_file(self, package: APK_Type, architecture: APK_Arch, version: str, mimetype: str, data: BytesIO,
                   retry: bool = False) -> bool:
         """ Save the package to the storage interface.  Remove the old version if it existed
 
         Args:
-            package (APKType): Package to save
-            architecture (APKArch): Architecture of the package to save
+            package (APK_Type): Package to save
+            architecture (APK_Arch): Architecture of the package to save
             version (str): Version of the package
             mimetype (str): Mimetype of the package
             data (io.BytesIO): binary contents to be saved
