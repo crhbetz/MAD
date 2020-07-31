@@ -45,6 +45,35 @@ class WorkerMITM(MITMBase):
         # TODO: pass the appropiate proto number if IV?
         self._wait_for_data(timestamp)
 
+    def _move_around(self):
+        walk_distance_post_teleport = self.get_devicesettings_value('walk_after_teleport_distance', 0)
+        walk_distance_post_teleport = 15
+
+        # TODO: actually use to_walk for distance
+        self.logger.debug("moving around")
+        lat_offset, lng_offset = get_lat_lng_offsets_by_distance(
+            walk_distance_post_teleport)
+
+        to_walk = get_distance_of_two_points_in_meters(float(self.current_location.lat),
+                                                       float(
+                                                           self.current_location.lng),
+                                                       float(
+                                                           self.current_location.lat) + lat_offset,
+                                                       float(self.current_location.lng) + lng_offset)
+        self.logger.info("Walking roughly: {}", str(to_walk))
+        self._communicator.walk_from_to(Location(self.current_location.lat + lat_offset,
+                                        self.current_location.lng + lng_offset),
+                                        self.current_location,
+                                        50)
+
+        self._communicator.walk_from_to(Location(self.current_location.lat - lat_offset,
+                                        self.current_location.lng + lng_offset),
+                                        self.current_location,
+                                        50)
+
+        self.logger.debug("Done moving around")
+
+
     def _move_to_location(self):
         if not self._mapping_manager.routemanager_present(self._routemanager_name) \
                 or self._stop_worker_event.is_set():
