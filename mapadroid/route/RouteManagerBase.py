@@ -555,8 +555,8 @@ class RouteManagerBase(ABC):
 
                 next_timestamp = next_prio[0]
                 next_coord = next_prio[1]
-                next_readableTime = datetime.fromtimestamp(next_timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                self.logger.info('Worker {} getting a closer_heapq prio event {} scheduled for {} ({}s ago)', origin, next_prio, next_readableTime, int(time.time() - next_timestamp))
+                next_readable_time = datetime.fromtimestamp(next_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                self.logger.info('Worker {} getting a closer_heapq prio event {} scheduled for {} ({}s ago)', origin, next_prio, next_readable_time, int(time.time() - next_timestamp))
                 # TODO: Consider if we want to have the following functionality for other modes, too
                 # Problem: delete_seconds_passed = 0 makes sense in _filter_priority_queue_internal,
                 # because it will remove past events only at the moment of prioQ calculation,
@@ -572,7 +572,7 @@ class RouteManagerBase(ABC):
                                        "Make sure you run enough workers or reduce "
                                        "the size of the area! "
                                        "(event was scheduled for {})",
-                                       self.name, next_readableTime)
+                                       self.name, next_readable_time)
                         return self.get_next_location(origin)
 
 
@@ -639,7 +639,7 @@ class RouteManagerBase(ABC):
                 self._positiontyp[origin] = 1
 
                 route_logger.info("Route {} is moving to {}, {} for a priority event scheduled for {} ({}s ago)",
-                        self.name, next_coord.lat, next_coord.lng, next_readableTime, int(time.time() - next_timestamp))
+                        self.name, next_coord.lat, next_coord.lng, next_readable_time, int(time.time() - next_timestamp))
                 next_coord = self._check_coord_and_maybe_del(next_coord, origin)
                 if next_coord is None:
                     # Coord was not ok, lets recurse
