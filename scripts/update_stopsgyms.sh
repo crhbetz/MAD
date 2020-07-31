@@ -6,7 +6,11 @@
 # You can probably leave this var alone. This is the default config file.
 # But if you have a reason that's not the config file you want to use, then go ahead and change
 # path to MAD config
-madconf="../configs/config.ini"
+if [[ -z "$1" ]]; then
+    madconf="../configs/config.ini"
+else
+    madconf="$1"
+fi
 ########################################################################################################
 ###################################HAPPY HUNTING#####KRZTHEHUNTER#######################################
 ########################################################################################################

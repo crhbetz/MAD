@@ -444,8 +444,8 @@ class WorkerQuests(MITMBase):
         self._mapping_manager.routemanager_set_worker_sleeping(self._routemanager_name, self._origin, 300)
         not_allow = ('Gift', 'Geschenk', 'Glücksei', 'Glucks-Ei', 'Glücks-Ei', 'Lucky Egg', 'CEuf Chance',
                      'Cadeau', 'Appareil photo', 'Wunderbox', 'Mystery Box', 'Boîte Mystère', 'Premium',
-                     'Raid', 'Teil',
-                     'Élément', 'mystérieux', 'Mysterious', 'Component', 'Mysteriöses')
+                     'Raid', 'Teil', 'Sonderbonbon',
+                     'Élément', 'mystérieux', 'Mysterious', 'Component', 'Mysteriöses', 'Lockmodul')
         x, y = self._resocalc.get_close_main_button_coords(self)
         self._communicator.click(int(x), int(y))
         time.sleep(1 + int(delayadd))
