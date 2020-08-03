@@ -69,14 +69,6 @@ class APIAutoConf(AutoConfHandler):
                 except UnknownIdentifier:
                     return ('Unknown device ID', 400)
             except (AttributeError, KeyError):
-                hopper_name = 'madrom'
-                hopper_response = origin_generator(self._data_manager, self.dbc, OriginBase=hopper_name)
-                if type(hopper_response) != tuple:
-                    return hopper_response
-                else:
-                    update['device_id'] = hopper_response[1]
-            device = self._data_manager.get_resource('device', update['device_id'])
-            if device['account_id'] is None:
                 # Auto-assign a google account as one was not specified
                 sql = "SELECT ag.`account_id`\n"\
                       "FROM `settings_pogoauth` ag\n"\
@@ -85,8 +77,15 @@ class APIAutoConf(AutoConfHandler):
                 account_id = self.dbc.autofetch_value(sql, (self.dbc.instance_id, 'google'))
                 if account_id is None:
                     return ('No configured emails', 400)
-                device['account_id'] = account_id
-                device.save()
+                hopper_name = 'madrom'
+                hopper_response = origin_generator(self._data_manager, self.dbc, OriginBase=hopper_name)
+                if type(hopper_response) != tuple:
+                    return hopper_response
+                else:
+                    device = self._data_manager.get_resource('device', update['device_id'])
+                    update['device_id'] = hopper_response[1]
+                    device['account_id'] = account_id
+                    device.save()
         where = {
             'session_id': session_id,
             'instance_id': self.dbc.instance_id
