@@ -19,8 +19,6 @@ class AutoConfigManager(object):
             ("/autoconfig/logs/<int:session_id>/update", self.autoconf_logs_get),
             ("/autoconfig/rgc", self.autoconf_rgc),
             ("/autoconfig/pd", self.autoconf_pd),
-            ("/autoconfig/google", self.autoconf_google),
-            ("/autoconfig/google/<int:email_id>", self.autoconf_google_single)
         ]
         for route_def in routes:
             if len(route_def) == 2:
@@ -32,40 +30,6 @@ class AutoConfigManager(object):
 
     def start_modul(self):
         self.add_route()
-
-    @auth_required
-    def autoconf_google(self):
-        sql = "SELECT ag.`email_id`, ag.`email`, sd.`device_id`, sd.`name`\n"\
-              "FROM `autoconfig_google` ag\n"\
-              "LEFT JOIN `settings_device` sd ON sd.`email_id` = ag.`email_id`\n"\
-              "WHERE ag.`instance_id` = %s"
-        accounts = self._db.autofetch_all(sql, (self._db.instance_id))
-        return render_template('autoconfig_google.html',
-                               subtab="autoconf_google",
-                               accounts=accounts,
-                               )
-
-    @auth_required
-    def autoconf_google_single(self, email_id):
-        if email_id == 0:
-            account = {}
-            uri = url_for('api_autoconf_google')
-        else:
-            sql = "SELECT *\n"\
-                  "FROM `autoconfig_google`\n"\
-                  "WHERE `instance_id` = %s AND `email_id` = %s"
-            account = self._db.autofetch_row(sql, (self._db.instance_id, email_id))
-            if not account:
-                return redirect(url_for('autoconfig_pending'), code=302)
-            uri = "{}/{}".format(url_for('api_autoconf_google'), email_id)
-        redir_uri = url_for('autoconf_google')
-        return render_template('autoconfig_google_single.html',
-                               subtab="autoconf_google",
-                               element=account,
-                               uri=uri,
-                               redirect=redir_uri,
-                               method='POST'
-                               )
 
     @auth_required
     def autoconf_logs(self, session_id):
@@ -113,8 +77,8 @@ class AutoConfigManager(object):
     def autoconfig_pending(self):
         is_ready = validate_hopper_ready(self._data_manager)
         sql = "SELECT count(*)\n"\
-              "FROM `autoconfig_google` ag\n"\
-              "LEFT JOIN `settings_device` sd ON sd.`email_id` = ag.`email_id`\n"\
+              "FROM `settings_pogoauth` ag\n"\
+              "LEFT JOIN `settings_device` sd ON sd.`account_id` = ag.`account_id`\n"\
               "WHERE ag.`instance_id` = %s AND sd.`device_id` IS NULL"
         has_logins = self._db.autofetch_value(sql, (self._db.instance_id)) > 0
         pending = {}
@@ -150,9 +114,9 @@ class AutoConfigManager(object):
         session = self._db.autofetch_row(sql, (session_id, self._db.instance_id))
         if not session:
             return redirect(url_for('autoconfig_pending'), code=302)
-        sql = "SELECT ag.`email_id`, ag.`email`\n"\
-              "FROM `autoconfig_google` ag\n"\
-              "LEFT JOIN `settings_device` sd ON sd.`email_id` = ag.`email_id`\n"\
+        sql = "SELECT ag.`account_id`, ag.`username`\n"\
+              "FROM `settings_pogoauth` ag\n"\
+              "LEFT JOIN `settings_device` sd ON sd.`account_id` = ag.`account_id`\n"\
               "WHERE ag.`instance_id` = %s AND (sd.`device_id` IS NULL OR sd.`device_id` = %s)"
         google_addresses = self._db.autofetch_all(sql, (self._db.instance_id, session['device_id']))
         devices = self._data_manager.get_root_resource('device')

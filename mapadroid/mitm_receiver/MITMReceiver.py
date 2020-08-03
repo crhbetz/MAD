@@ -88,7 +88,7 @@ class EndpointAction(object):
                 abort = False
         elif 'autoconfig/' in str(request.url):
             auth = request.headers.get('Authorization', None)
-            if auth is None or not check_auth(logger, auth, self.application_args, self.mapping_manager.get_auths()):
+            if not check_auth(logger, auth, self.application_args, self.mapping_manager.get_auths()):
                 origin_logger.warning("Unauthorized attempt to POST from {}", request.remote_addr)
                 self.response = Response(status=403, headers={})
                 abort = True
@@ -100,7 +100,7 @@ class EndpointAction(object):
                     self.response = Response(status=403, headers={})
         elif str(request.url_rule) == '/origin_generator':
             auth = request.headers.get('Authorization', None)
-            if auth is None or not check_auth(logger, auth, self.application_args, self.mapping_manager.get_auths()):
+            if not check_auth(logger, auth, self.application_args, self.mapping_manager.get_auths()):
                 origin_logger.warning("Unauthorized attempt to POST from {}", request.remote_addr)
                 self.response = Response(status=403, headers={})
                 abort = True
@@ -414,14 +414,14 @@ class MITMReceiver(Process):
                 return send_file(config.generate_config(origin), as_attachment=True, attachment_filename='conf.xml',
                                  mimetype='application/xml')
             elif operation in ['google']:
-                sql = "SELECT ag.`email`, ag.`pwd`\n"\
-                      "FROM `autoconfig_google` ag\n"\
-                      "INNER JOIN `settings_device` sd ON sd.`email_id` = ag.`email_id`\n"\
+                sql = "SELECT ag.`username`, ag.`password`\n"\
+                      "FROM `settings_pogoauth` ag\n"\
+                      "INNER JOIN `settings_device` sd ON sd.`account_id` = ag.`account_id`\n"\
                       "INNER JOIN `autoconfig_registration` ar ON ar.`device_id` = sd.`device_id`\n"\
                       "WHERE ar.`session_id` = %s and ag.`instance_id` = %s"
                 login = self._db_wrapper.autofetch_row(sql, (session_id, self._db_wrapper.instance_id))
                 if login:
-                    return Response(status=200, response='\n'.join([login['email'], login['pwd']]))
+                    return Response(status=200, response='\n'.join([login['username'], login['password']]))
                 else:
                     return Response(status=404, response='')
             elif operation == 'origin':
@@ -433,16 +433,20 @@ class MITMReceiver(Process):
     def autoconfig_log(self, *args, **kwargs) -> Response:
         session_id: Optional[int] = kwargs.get('session_id', None)
         try:
-            level = kwargs.get('level')
-            msg = kwargs.get('msg')
+            level = kwargs['level']
+            msg = kwargs['msg']
         except KeyError:
             level, msg = str(request.data, 'utf-8').split(',', 1)
         info = {
             'session_id': session_id,
             'instance_id': self._db_wrapper.instance_id,
-            'level': int(level),
             'msg': msg
         }
+        try:
+            info['level'] = int(level)
+        except TypeError:
+            info['level'] = 0
+            logger.warning('Unable to parse level for autoconfig log')
         self._db_wrapper.autoexec_insert('autoconfig_logs', info)
         sql = "SELECT `status`\n"\
               "FROM `autoconfig_registration`\n"\
