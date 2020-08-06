@@ -1,4 +1,5 @@
 import copy
+import json
 from unittest import TestCase
 import mapadroid.tests.test_variables as global_variables
 from mapadroid.tests.test_utils import get_connection_api, get_connection_mitm, ResourceCreator
@@ -25,6 +26,24 @@ class MITMAutoConf(TestCase):
         session_id = res.content.decode('utf-8')
         res = self.mitm.delete('/autoconfig/{}/complete'.format(session_id))
         self.assertTrue(res.status_code == 200)
+
+    def test_autoconf_no_google(self):
+        session_id = None
+        try:
+            res = self.mitm.post('/autoconfig/register')
+            self.assertTrue(res.status_code == 201)
+            session_id = res.content.decode('utf-8')
+            accept_info = {
+                'status': 1,
+            }
+            res = self.api.post('/api/autoconf/{}'.format(session_id), json=accept_info)
+            self.assertTrue(res.status_code == 400)
+            self.assertTrue(json.loads(res.content) == "No configured emails")
+        except Exception:
+            raise
+        finally:
+            if session_id is not None:
+                self.mitm.delete('/autoconfig/{}/complete'.format(session_id))
 
     def test_workflow_assigned_device(self):
         api_creator = ResourceCreator(self.api)
