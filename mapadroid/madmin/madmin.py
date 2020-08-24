@@ -52,6 +52,7 @@ def internal_error(self, exception):
 class MADmin(object):
     def __init__(self, args, db_wrapper: DbWrapper, ws_server, mapping_manager: MappingManager, data_manager,
                  device_updater, jobstatus, storage_obj):
+        app.add_template_global(name='app_config_mode', f=args.config_mode)
         self._db_wrapper: DbWrapper = db_wrapper
         self._args = args
         self._app = app
@@ -76,7 +77,8 @@ class MADmin(object):
                                       self._storage_obj)
         self.event = MADminEvent(self._db_wrapper, self._args, logger, self._app, self._mapping_manager,
                                  self._data_manager)
-        self.autoconf = AutoConfigManager(self._db_wrapper, self._app, self._data_manager, self._args)
+        self.autoconf = AutoConfigManager(self._db_wrapper, self._app, self._data_manager, self._args,
+                                          self._storage_obj)
 
     @logger.catch()
     def madmin_start(self):

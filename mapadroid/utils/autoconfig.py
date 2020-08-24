@@ -1,10 +1,51 @@
-from flask import Response
+from flask import Response, url_for
 import copy
 import json
 from io import BytesIO
-from typing import Any, List, NoReturn
+from typing import Any, List, NoReturn, Tuple
 from xml.sax.saxutils import escape
 from mapadroid.data_manager.modules import MAPPINGS
+from mapadroid.mad_apk import get_apk_status
+from mapadroid.data_manager.modules.resource import USER_READABLE_ERRORS
+
+
+def generate_autoconf_issues(db, data_manager, args, storage_obj) -> Tuple[List[str], List[str]]:
+    issues_warning = []
+    issues_critical = []
+    sql = "SELECT count(*)\n" \
+          "FROM `settings_pogoauth` ag\n" \
+          "LEFT JOIN `settings_device` sd ON sd.`account_id` = ag.`account_id`\n" \
+          "WHERE ag.`instance_id` = %s AND sd.`device_id` IS NULL"
+    if db.autofetch_value(sql, (db.instance_id)) == 0 and not args.autoconfig_no_auth:
+        link = url_for('settings_pogoauth')
+        anchor = f"<a href=\"{link}\">PogoAuth</a>"
+        issues_warning.append(f"No available Google logins for auto creation of devices. Configure through {anchor}")
+    if not validate_hopper_ready(data_manager):
+        link = url_for('settings_walkers')
+        anchor = f"<a href=\"{link}\">Walker</a>"
+        issues_critical.append(f"No walkers configured. Configure through {anchor}")
+    if not data_manager.get_root_resource('auth'):
+        link = url_for('settings_auth')
+        anchor = f"<a href=\"{link}\">Auth</a>"
+        issues_warning.append(f"No auth configured which is a potential security risk. Configure through {anchor}")
+    if not PDConfig(db, args, data_manager).configured:
+        link = url_for('autoconf_pd')
+        anchor = f"<a href=\"{link}\">PogoDroid Configuration</a>"
+        issues_critical.append(f"PogoDroid is not configured. Configure through {anchor}")
+    if not RGCConfig(db, args, data_manager).configured:
+        link = url_for('autoconf_rgc')
+        anchor = f"<a href=\"{link}\">RemoteGPSController Configuration</a>"
+        issues_critical.append(f"RGC is not configured. Configure through {anchor}")
+    missing_packages = []
+    for _, apkpackages in get_apk_status(storage_obj).items():
+        for _, package in apkpackages.items():
+            if package.version is None:
+                missing_packages.append(package)
+    if missing_packages:
+        link = url_for('mad_apks')
+        anchor = f"<a href=\"{link}\">MADmin Packages</a>"
+        issues_critical.append(f"Missing one or more required packages. Configure through {anchor}")
+    return (issues_warning, issues_critical)
 
 
 def validate_hopper_ready(data_manager):
@@ -77,7 +118,15 @@ class AutoConfigCreator:
         self._args = args
         self._data_manager = data_manager
         self.contents: dict[str, Any] = {}
+        self.configured: bool = False
         self.load_config()
+
+    def delete(self):
+        del_info = {
+            "name": self.source,
+            "instance_id": self._db.instance_id
+        }
+        self._db.autoexec_delete('autoconfig_file', del_info)
 
     def generate_config(self, origin: str) -> str:
         origin_config = self.get_config()
@@ -122,6 +171,7 @@ class AutoConfigCreator:
             db_conf = self._db.autofetch_value(sql, (self.source, self._db.instance_id))
             if db_conf:
                 self.contents = json.loads(db_conf)
+                self.configured = True
             else:
                 self.contents = {}
         except json.decoder.JSONDecodeError:
@@ -160,14 +210,21 @@ class AutoConfigCreator:
                     check_func = elem['expected']
                     if elem['expected'] == 'bool':
                         if user_vals[key] not in [True, False]:
-                            invalid.append(key)
+                            invalid.append((key, USER_READABLE_ERRORS[bool]))
                     self.contents[key] = check_func(user_vals[key])
                 except KeyError:
                     if key not in self.contents:
                         self.contents[key] = elem['default'] if elem['default'] not in ['None', None] else ""
                 except (TypeError, ValueError):
-                    invalid.append(key)
+                    invalid.append((key, USER_READABLE_ERRORS[check_func]))
         unknown = set(list(user_vals.keys())) - set(processed)
+        try:
+            invalid_dest = ['127.0.0.1', '0.0.0.0']
+            for dest in invalid_dest:
+                if dest in self.contents[self.host_field]:
+                    invalid.append((self.host_field, "Routable address from outside the server"))
+        except KeyError:
+            pass
         issues = {}
         if missing:
             issues['missing'] = missing
@@ -181,6 +238,7 @@ class AutoConfigCreator:
 
 
 class RGCConfig(AutoConfigCreator):
+    host_field = "websocket_uri"
     origin_field = "websocket_origin"
     source = "rgc"
     sections = {
@@ -199,7 +257,7 @@ class RGCConfig(AutoConfigCreator):
                 "expected": int,
                 "default": None,
                 "summary": "Authentication credentials to use when performing basic auth",
-                "require": False,
+                "required": False,
             },
             "websocket_origin": {
                 "hidden": True,
@@ -258,7 +316,7 @@ class RGCConfig(AutoConfigCreator):
                 "title": "Override OOM value",
                 "type": "bool",
                 "expected": bool,
-                "default": False,
+                "default": True,
                 "summary": "Overrides the oom_adj value to reduce the possibility of the process being killed when "
                            "the system runs out of memory.",
                 "required": False
@@ -285,7 +343,7 @@ class RGCConfig(AutoConfigCreator):
                 "title": "Use Android Mock location",
                 "type": "bool",
                 "expected": bool,
-                "default": False,
+                "default": True,
                 "summary": "Requires RGC to be set as Mocking app in developer options",
                 "required": False
             },
@@ -302,7 +360,7 @@ class RGCConfig(AutoConfigCreator):
                 "type": "option",
                 "values": ["Minimal", "Common", "Indirect"],
                 "expected": str,
-                "default": "",
+                "default": "Minimal",
                 "summary": "Defines how many providers are overwritten (also known as indirect mocking). Minimal "
                            "(only GPS), Common (GPS, Network, Passive)",
                 "required": False
@@ -321,7 +379,7 @@ class RGCConfig(AutoConfigCreator):
                 "title": "Start on boot",
                 "type": "bool",
                 "expected": bool,
-                "default": False,
+                "default": True,
                 "summary": "Start app on boot",
                 "required": False
             },
@@ -337,7 +395,7 @@ class RGCConfig(AutoConfigCreator):
                 "title": "Start services on appstart",
                 "type": "bool",
                 "expected": bool,
-                "default": False,
+                "default": True,
                 "summary": "Automatically start the services when the app is opened",
                 "required": False
             }
@@ -354,6 +412,7 @@ class RGCConfig(AutoConfigCreator):
 
 
 class PDConfig(AutoConfigCreator):
+    host_field = "post_destination"
     origin_field = "post_origin"
     source = "pd"
     sections = {
@@ -481,7 +540,7 @@ class PDConfig(AutoConfigCreator):
                 "title": "GZIP the raw data that is to be posted.",
                 "type": "bool",
                 "expected": bool,
-                "default": False,
+                "default": True,
                 "summary": "",
                 "required": False
             },
@@ -498,7 +557,7 @@ class PDConfig(AutoConfigCreator):
                 "type": "bool",
                 "expected": bool,
                 "default": False,
-                "summary": "Disable display of notifcations of the last timestamp data was sent at. Attempts are also "
+                "summary": "Disable display of notifications of the last timestamp data was sent at. Attempts are also "
                            " logged for debugging of connectivity issues.",
                 "required": False
             },
@@ -578,7 +637,7 @@ class PDConfig(AutoConfigCreator):
                 "title": "Default to mapping mode",
                 "type": "bool",
                 "expected": bool,
-                "default": False,
+                "default": True,
                 "summary": "",
                 "required": False
             },
@@ -586,7 +645,7 @@ class PDConfig(AutoConfigCreator):
                 "title": "Patch SELinux",
                 "type": "bool",
                 "expected": bool,
-                "default": True,
+                "default": False,
                 "summary": "Patches very few SELinux rules, require for Samsung Stock ROMs for example (generally "
                            "enforcing kernels)",
                 "required": False
@@ -595,7 +654,7 @@ class PDConfig(AutoConfigCreator):
                 "title": "Full daemon mode",
                 "type": "bool",
                 "expected": bool,
-                "default": False,
+                "default": True,
                 "summary": "Automatically start app on boot (and watchdog if enabled)",
                 "required": False
             },
@@ -603,7 +662,7 @@ class PDConfig(AutoConfigCreator):
                 "title": "Start Pogodroid with a delay (seconds)",
                 "type": int,
                 "expected": int,
-                "default": 100,
+                "default": 30,
                 "summary": "",
                 "required": False
             },
@@ -611,7 +670,7 @@ class PDConfig(AutoConfigCreator):
                 "title": "Override OOM value",
                 "type": "bool",
                 "expected": bool,
-                "default": False,
+                "default": True,
                 "summary": "Enables OOM adjustments to reduce the 'risk' of Android killing the app.",
                 "required": False
             },
