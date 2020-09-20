@@ -14,6 +14,7 @@
 <script>
     var errorCount = 0;
     var dataTable = $("#show-data-status").DataTable({
+        "lengthMenu": [ [10, 25, 50, 100, -1], [10, 25, 50, 100, "All"] ],
         "ajax": {
             "url": "get_status",
             "dataSrc": function (data) {
@@ -124,14 +125,26 @@
         "stateDuration": 0
     });
 
+    var showAllButton = $('#btn-show-all-children')
+    var hideAllButton = $('#btn-hide-all-children')
+
+    // Hide expand all hide all if table is not responsive
+    if (dataTable.responsive.hasHidden()){
+        showAllButton.show()
+        hideAllButton.show()
+    }else{
+        showAllButton.hide()
+        hideAllButton.hide()
+    }
+
         // Handle click on "Expand All" button
-    $('#btn-show-all-children').on('click', function(){
+    showAllButton.on('click', function(){
         // Expand row details
         dataTable.rows(':not(.parent)').nodes().to$().find('td:first-child').trigger('click');
     });
 
     // Handle click on "Collapse All" button
-    $('#btn-hide-all-children').on('click', function(){
+    hideAllButton.on('click', function(){
         // Collapse row details
         dataTable.rows('.parent').nodes().to$().find('td:first-child').trigger('click');
     });
