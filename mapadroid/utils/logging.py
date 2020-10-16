@@ -80,9 +80,10 @@ def init_logging(args):
         file_logs = {
             "sink": os.path.join(args.log_path, args.log_filename),
             "format": fs_log_format,
+            "colorize": colorize,
             "level": log_file_level,
             "backtrace": True,
-            "diagnose": log_file_trace,
+            "diagnose": True,
             "enqueue": True,
             "encoding": "UTF-8"
         }
