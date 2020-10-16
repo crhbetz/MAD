@@ -64,6 +64,8 @@ def parse_args():
                         help='Port to listen on for proto data (MITM data). Default: 8000.')
     parser.add_argument('-mrdw', '--mitmreceiver_data_workers', type=int, default=2,
                         help='Amount of workers to work off the data that queues up. Default: 2.')
+    parser.add_argument('-mipb', '--mitm_ignore_pre_boot', default=False, type=bool,
+                        help='Ignore MITM data having a timestamp pre MAD\'s startup time.')
 
     # WEBSOCKET
     parser.add_argument('-wsip', '--ws_ip', required=False, default="0.0.0.0", type=str,
@@ -366,6 +368,11 @@ def parse_args():
     parser.add_argument('-gp', '--gmail_passwd', default='',
                         help='Google Mail Password for interacting with the Google Play Store.  Must be an app'
                         ' password or 2fa will be triggered (this should be enabled on your account anyways')
+
+    # Auto-Configuration
+    parser.add_argument('-acna', '--autoconfig_no_auth', action='store_true', default=False,
+                        help='MAD PoGo auth is not required during autoconfiguration',
+                        dest='autoconfig_no_auth')
 
     args = parser.parse_args()
 

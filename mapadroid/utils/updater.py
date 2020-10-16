@@ -130,7 +130,7 @@ class DeviceUpdater(object):
                 processtime = datetime.timestamp(datetime.now() + timedelta(minutes=algo))
 
                 self.write_status_log(str(job_id), field='processingdate', value=processtime)
-                self.add_job(globalid, origin, file_, job_id=job_id, type=jobtype, counter=0, status='future',
+                self.add_job(globalid, origin, file_, job_id=job_id, job_type=jobtype, counter=0, status='future',
                              waittime=waittime, processtime=processtime, redo=redo, jobname=jobname)
 
             else:
@@ -633,8 +633,7 @@ class DeviceUpdater(object):
                     self._globaljoblog[globalid]['autojob'] = True
                     self._globaljoblog[globalid]['redoonerror'] = autocommand.get('redoonerror', False)
 
-                    self.preadd_job(origin=origin, job=job, job_id=int(time.time()),
-                                    job_type=str(JobType.CHAIN))
+                    self.preadd_job(origin, job, int(time.time()), str(JobType.CHAIN))
                     # get a unique id !
                     time.sleep(1)
         else:

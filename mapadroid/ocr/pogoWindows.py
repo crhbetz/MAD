@@ -178,7 +178,7 @@ class PogoWindows:
 
         num_lines = 0
         lines = []
-        lines = cv2.HoughLinesP(edges, rho=1, theta=math.pi / 180, threshold=70, minLineLength=min_line_length,
+        lines = cv2.HoughLinesP(edges, rho=1, theta=math.pi / 180, threshold=90, minLineLength=min_line_length,
                                 maxLineGap=5)
         if lines is None:
             return False
@@ -590,7 +590,7 @@ class PogoWindows:
                     origin_logger.debug("Screentext: {}", globaldict)
                     if globaldict is None or 'text' not in globaldict:
                         continue
-                    n_boxes = len(globaldict['level'])
+                    n_boxes = len(globaldict['text'])
                     for index in range(n_boxes):
                         if returntype != ScreenType.UNDEFINED:
                             break

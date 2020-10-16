@@ -356,7 +356,10 @@ class DbWrapper:
             hours = datetime.utcnow() - timedelta(hours=hours)
             query_where = ' where disappear_time > \'%s\' ' % str(hours)
 
-        query = "SELECT pokemon_id, count(pokemon_id) from pokemon %s group by pokemon_id" % str(query_where)
+        query = (
+            "SELECT pokemon_id, COUNT(pokemon_id) FROM pokemon %s GROUP BY pokemon_id" % str(
+                query_where)
+        )
 
         res = self.execute(query)
 
@@ -503,7 +506,8 @@ class DbWrapper:
             "SELECT gym.gym_id, gym.latitude, gym.longitude, "
             "gymdetails.name, gymdetails.url, gym.team_id, "
             "gym.last_modified, raid.level, raid.spawn, raid.start, "
-            "raid.end, raid.pokemon_id, raid.form, gym.last_scanned "
+            "raid.end, raid.pokemon_id, raid.form, raid.costume, "
+            "raid.evolution, gym.last_scanned "
             "FROM gym "
             "INNER JOIN gymdetails ON gym.gym_id = gymdetails.gym_id "
             "LEFT JOIN raid ON raid.gym_id = gym.gym_id "
@@ -538,7 +542,7 @@ class DbWrapper:
         res = self.execute(query + query_where)
 
         for (gym_id, latitude, longitude, name, url, team_id, last_updated,
-             level, spawn, start, end, mon_id, form, last_scanned) in res:
+             level, spawn, start, end, mon_id, form, costume, evolution, last_scanned) in res:
 
             nowts = datetime.utcfromtimestamp(time.time()).timestamp()
 
@@ -552,7 +556,9 @@ class DbWrapper:
                     "end": int(end.replace(tzinfo=timezone.utc).timestamp()),
                     "mon": mon_id,
                     "form": form,
-                    "level": level
+                    "level": level,
+                    "costume": costume,
+                    "evolution": evolution
                 }
 
             gyms[gym_id] = {

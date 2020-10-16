@@ -6,7 +6,7 @@ from typing import Tuple, Union, Generator
 from .apk_enums import APKArch, APKType, APKPackage
 from .abstract_apk_storage import AbstractAPKStorage
 from .custom_types import MADapks, MADPackage, MADPackages
-from mapadroid.utils.global_variables import CHUNK_MAX_SIZE, ADDRESSES_GITHUB
+from mapadroid.utils.global_variables import CHUNK_MAX_SIZE, VERSIONCODES_URL
 from mapadroid.utils.logging import get_logger, LoggerEnums
 
 
@@ -204,7 +204,11 @@ def lookup_package_info(storage_obj: AbstractAPKStorage, package: APKType,
     Returns:
         Tuple containing (Package or Packages info, status code)
     """
-    package_info: MADPackages = storage_obj.get_current_package_info(package)
+    package_info: MADPackages = None
+    try:
+        package_info = storage_obj.get_current_package_info(package)
+    except AttributeError:
+        pass
     if package_info is None:
         return (None, 404)
     if architecture is None:
@@ -276,14 +280,14 @@ def supported_pogo_version(architecture: APKArch, version: str) -> bool:
     else:
         bits = '64'
     try:
-        with open('configs/addresses.json') as fh:
+        with open('configs/version_codes.json') as fh:
             address_object = json.load(fh)
             composite_key = '%s_%s' % (version, bits,)
             address_object[composite_key]
             valid = True
     except KeyError:
         try:
-            requests.get(ADDRESSES_GITHUB).json()[composite_key]
+            requests.get(VERSIONCODES_URL).json()[composite_key]
             valid = True
         except KeyError:
             pass

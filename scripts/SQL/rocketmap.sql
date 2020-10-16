@@ -119,7 +119,7 @@ CREATE TABLE `pokemon` (
     KEY `pokemon_last_modified` (`last_modified`),
     KEY `pokemon_latitude_longitude` (`latitude`,`longitude`),
     KEY `pokemon_disappear_time_pokemon_id` (`disappear_time`,`pokemon_id`),
-    KEY `pokemon_individual_attack` (`individual_attack`)
+    KEY `pokemon_iv` (`individual_attack`, `individual_defense`, `individual_stamina`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `pokestop` (
@@ -160,6 +160,7 @@ CREATE TABLE `raid` (
     `is_exclusive` tinyint(1) DEFAULT NULL,
     `gender` tinyint(1) DEFAULT NULL,
     `costume` tinyint(1) DEFAULT NULL,
+    `evolution` smallint(6) DEFAULT NULL,
     PRIMARY KEY (`gym_id`),
     KEY `raid_level` (`level`),
     KEY `raid_spawn` (`spawn`),
@@ -377,7 +378,6 @@ CREATE TABLE `settings_device` (
     `screendetection` tinyint(1) DEFAULT NULL,
     `logintype` enum('google','ptc') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
     `ggl_login_mail` varchar(256) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-    `ptc_login` varchar(256) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
     `clear_game_data` tinyint(1) DEFAULT NULL,
     `account_rotation` tinyint(1) DEFAULT NULL,
     `rotation_waittime` float DEFAULT NULL,
@@ -385,6 +385,8 @@ CREATE TABLE `settings_device` (
     `injection_thresh_reboot` int(11) DEFAULT NULL,
     `enhanced_mode_quest` tinyint(1) DEFAULT NULL,
     `enhanced_mode_quest_safe_items` VARCHAR(500) NULL,
+    `mac_address` VARCHAR(17) CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_unicode_ci' NULL,
+    `interface_type` enum('lan','wlan') COLLATE utf8mb4_unicode_ci DEFAULT 'lan',
     PRIMARY KEY (`device_id`),
     KEY `settings_device_ibfk_1` (`walker_id`),
     KEY `settings_device_ibfk_2` (`pool_id`),
@@ -743,3 +745,65 @@ CREATE VIEW `v_trs_status` AS
     FROM `trs_status` trs
     INNER JOIN `settings_device` dev ON dev.`device_id` = trs.`device_id`
     LEFT JOIN `settings_area` sa ON sa.`area_id` = trs.`area_id`;
+
+CREATE TABLE `autoconfig_registration` (
+    `instance_id` int(10) unsigned NOT NULL,
+    `session_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `device_id` int(10) unsigned NULL,
+    `ip` varchar(39) NOT NULL,
+    `status` int(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+    PRIMARY KEY (`session_id`),
+    CONSTRAINT `fk_ac_r_instance` FOREIGN KEY (`instance_id`)
+        REFERENCES `madmin_instance` (`instance_id`)
+        ON DELETE CASCADE,
+    CONSTRAINT `fk_ac_r_device` FOREIGN KEY (`device_id`)
+            REFERENCES `settings_device` (`device_id`)
+            ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `autoconfig_file` (
+    `instance_id` int(10) unsigned NOT NULL,
+    `name` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+    `data` longblob NOT NULL,
+    PRIMARY KEY (`instance_id`, `name`),
+    CONSTRAINT `fk_ac_f_instance` FOREIGN KEY (`instance_id`)
+        REFERENCES `madmin_instance` (`instance_id`)
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `autoconfig_logs` (
+    `log_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `instance_id` int(10) unsigned NOT NULL,
+    `session_id` int(10) unsigned NOT NULL,
+    `log_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `level` int(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 2,
+    `msg` varchar(1024) COLLATE utf8mb4_unicode_ci NOT NULL,
+    PRIMARY KEY (`log_id`),
+    KEY `k_acl` (`instance_id`, `session_id`),
+    CONSTRAINT `fk_ac_l_instance` FOREIGN KEY (`session_id`)
+        REFERENCES `autoconfig_registration` (`session_id`)
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `settings_pogoauth` (
+    `instance_id` int(10) unsigned NOT NULL,
+    `account_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `device_id` int(10) unsigned NULL,
+    `login_type` enum('google','ptc') COLLATE utf8mb4_unicode_ci NOT NULL,
+    `username` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+    `password` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+    PRIMARY KEY (`account_id`),
+    CONSTRAINT `fk_ac_g_instance` FOREIGN KEY (`instance_id`)
+        REFERENCES `madmin_instance` (`instance_id`)
+        ON DELETE CASCADE,
+    CONSTRAINT `settings_pogoauth_u1` UNIQUE (`login_type`, `username`),
+    CONSTRAINT `fk_spa_device_id` FOREIGN KEY (`device_id`)
+            REFERENCES `settings_device` (`device_id`)
+            ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `origin_hopper` (
+    `origin` VARCHAR(128) NOT NULL,
+    `last_id` int UNSIGNED NOT NULL,
+    PRIMARY KEY (`origin`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

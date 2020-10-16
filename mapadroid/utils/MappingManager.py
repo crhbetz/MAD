@@ -323,6 +323,9 @@ class MappingManager:
             logger.opt(exception=True).error('Unable to start recalculation')
         return successful
 
+    def data_manager_is_device_active(self, device_id: int):
+        return self.__data_manager.is_device_active(device_id)
+
     def __inherit_device_settings(self, devicesettings, poolsettings):
         inheritsettings = {}
         for pool_setting in poolsettings:
@@ -475,6 +478,10 @@ class MappingManager:
             walker = int(device["walker"])
             device_dict["adb"] = device.get("adbname", None)
             pool = device.get("pool", None)
+            device_dict['ptc_login'] = []
+            for account_id in device.get("ptc_login", []):
+                account = self.__data_manager.get_resource('pogoauth', identifier=account_id)
+                device_dict['ptc_login'].append((account['username'], account['password']))
             settings = device.get("settings", None)
             try:
                 device_dict["settings"] = self.__inherit_device_settings(settings,

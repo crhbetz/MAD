@@ -1,8 +1,15 @@
+import re
+from typing import List, Optional
 from .resource import Resource
+from mapadroid.data_manager.modules.pogoauth import PogoAuth
 from mapadroid.utils.logging import get_logger, LoggerEnums, get_origin_logger
 
 
 logger = get_logger(LoggerEnums.data_manager)
+pogoauth_fields = {
+    'ggl_login': 'google',
+    'ptc_login': 'ptc'
+}
 
 
 class Device(Resource):
@@ -13,7 +20,7 @@ class Device(Resource):
     translations = {
         'origin': 'name',
         'pool': 'pool_id',
-        'walker': 'walker_id'
+        'walker': 'walker_id',
     }
     configuration = {
         "fields": {
@@ -55,6 +62,47 @@ class Device(Resource):
                     "require": False,
                     "empty": None,
                     "description": "ADB devicename",
+                    "expected": str
+                }
+            },
+            "ggl_login": {
+                "settings": {
+                    "type": "emailselect_google",
+                    "require": False,
+                    "empty": None,
+                    "description": "Assigned Google address",
+                    "expected": int,
+                    "uri": True,
+                    "data_source": "pogoauth",
+                    "uri_source": "api_pogoauth"
+                }
+            },
+            "ptc_login": {
+                "settings": {
+                    "type": "ptcselector",
+                    "require": False,
+                    "empty": None,
+                    "description": "PTC accounts assigned to the device",
+                    "expected": list,
+                    "uri": True,
+                    "data_source": "pogoauth",
+                    "uri_source": "api_pogoauth"
+                }
+            },
+            "interface_type": {
+                "settings": {
+                    "type": "option",
+                    "values": ["lan", "wlan"],
+                    "require": False,
+                    "description": "Interface type to use",
+                    "expected": str
+                }
+            },
+            "mac_address": {
+                "settings": {
+                    "type": "text",
+                    "require": False,
+                    "description": "MAC address of the device",
                     "expected": str
                 }
             }
@@ -269,15 +317,6 @@ class Device(Resource):
                     "expected": str
                 }
             },
-            "ptc_login": {
-                "settings": {
-                    "type": "text",
-                    "require": False,
-                    "description": "PTC User/Password (Format username,password).  Use | to set more the one account "
-                                   "(username,password|username,password)",
-                    "expected": str
-                }
-            },
             "clear_game_data": {
                 "settings": {
                     "type": "option",
@@ -348,8 +387,98 @@ class Device(Resource):
         origin_logger.info('Removing visitation status')
         self._dbc.flush_levelinfo(self['origin'])
 
+    def validate_custom(self) -> Optional[dict]:
+        data = self.get_resource(backend=True)
+        issues = {
+            'invalid': []
+        }
+        bad_macs = []
+        mac_fields = ['mac_address', 'wifi_mac_address']
+        for field in mac_fields:
+            if field not in data:
+                continue
+            if data[field] is None:
+                continue
+            if not re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", data[field].lower()):
+                bad_macs.append((field, 'Invalid MAC address'))
+                continue
+            search = {
+                field: data[field]
+            }
+            in_use = self._data_manager.search('device', params=search)
+            for dev_id, device in in_use.items():
+                if dev_id != self.identifier:
+                    bad_macs.append((field, 'MAC in use'))
+        if bad_macs:
+            issues['invalid'] += bad_macs
+
+        if self['ggl_login'] is not None:
+            if self['ggl_login'] not in PogoAuth.get_avail_accounts(self._data_manager,
+                                                                    auth_type='google',
+                                                                    device_id=self.identifier):
+                issues['invalid'].append(('ggl_login', 'Invalid Google Account specified'))
+        if self['ptc_login'] is not None:
+            invalid_ptc = []
+            valid_auth = PogoAuth.get_avail_accounts(self._data_manager, 'ptc', device_id=self.identifier)
+            for ptc in self['ptc_login']:
+                if int(ptc) not in valid_auth:
+                    invalid_ptc.append(ptc)
+            if invalid_ptc:
+                msg = 'Invalid PogoAuth specified [%s]' % ','.join([str(x) for x in invalid_ptc])
+                issues['invalid'].append(('ptc_login', msg))
+        if any(issues['invalid']):
+            return issues
+
     def _load(self) -> None:
         super()._load()
         self.state = 0
-        if self._data_manager.is_device_active(self['origin']):
+        if self._data_manager.is_device_active(self.identifier):
             self.state = 1
+        for field, lookup_val in pogoauth_fields.items():
+            search = {
+                'device_id': self.identifier,
+                'login_type': lookup_val
+            }
+            logins = self._data_manager.search('pogoauth', params=search)
+            if field == 'ptc_login':
+                self[field] = list(logins.keys())
+            else:
+                try:
+                    self[field] = next(iter(logins))
+                except StopIteration:
+                    self[field] = None
+
+    def save(self, force_insert: Optional[bool] = False, ignore_issues: Optional[List[str]] = []) -> int:
+        core_data = self.get_core()
+        for field in pogoauth_fields:
+            try:
+                del core_data[field]
+            except KeyError:
+                pass
+        super().save(core_data=core_data, force_insert=force_insert, ignore_issues=ignore_issues)
+        # Clear out old values
+        for field, lookup_val in pogoauth_fields.items():
+            search = {
+                'device_id': self.identifier,
+                'login_type': lookup_val
+            }
+            matched_auths = self._data_manager.search('pogoauth', params=search)
+            for auth_id, auth in matched_auths.items():
+                if field == 'ggl_login' and self[field] != auth_id:
+                    auth['device_id'] = None
+                    auth.save()
+                elif field == 'ptc_login' and auth_id not in self[field]:
+                    auth['device_id'] = None
+                    auth.save()
+        # Save new auth
+        if self['ggl_login'] is not None:
+            pogoauth: PogoAuth = self._data_manager.get_resource('pogoauth', self['ggl_login'])
+            if pogoauth['device_id'] != self.identifier:
+                pogoauth['device_id'] = self.identifier
+                pogoauth.save()
+        if self['ptc_login']:
+            for auth_id in self['ptc_login']:
+                pogoauth: PogoAuth = self._data_manager.get_resource('pogoauth', auth_id)
+                if pogoauth['device_id'] != self.identifier:
+                    pogoauth['device_id'] = self.identifier
+                    pogoauth.save()

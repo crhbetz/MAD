@@ -31,6 +31,7 @@
 #mitmreceiver_ip:           # IP to listen on for proto data (MITM data). Default: 0.0.0.0 (every interface).
 #mitmreceiver_port:         # Highly recommended to change. Port to listen on for proto data (MITM data). Default: 8000.
 #mitmreceiver_data_workers: # Amount of workers to work off the data that queues up. Default: 2
+#mitm_ignore_pre_boot       # Ignore data from workers that was found before MAD (re)start. For bigger instances, when MITM data (...) falling behind on (re)start
 
 # Walk Settings
 ######################
@@ -140,3 +141,13 @@
                              #  at 12:00' or a maximum file size like '100 MB' or '0.5 GB'. Set to '0' to disable completely. (Default: 50 MB)
 #log_level:                  # Forces a certain log level. By default by the -v command to show DEBUG logs.
                              #  Custom log levels like DEBUG[1-5] can be used too
+# MADAPKs
+######################
+#token_dispenser:           # Path to token dispenser config (MAD-provided)
+#token_dispenser_user:      # Path to token dispenser config (User-provided)
+#gmail_user:                # Email address if not using a token dispenser
+#gmail_passwd:              # Google Mail Password for interacting with the Google Play Store.  Must be an app password or 2fa will be triggered (this should be enabled on your account anyways')
+
+# Auto-Config
+######################
+#autoconfig_no_auth          # MAD PoGo auth is not required during autoconfiguration
