@@ -156,8 +156,8 @@ class WorkerQuests(MITMBase):
         self.logger.debug("Getting time")
         speed = routemanager_settings.get("speed", 0)
         max_distance = routemanager_settings.get("max_distance", None)
-        if (speed == 0 or (max_distance and 0 < max_distance < distance) or
-                (self.last_location.lat == 0.0 and self.last_location.lng == 0.0)):
+        if (speed == 0 or (max_distance and 0 < max_distance < distance)
+                or (self.last_location.lat == 0.0 and self.last_location.lng == 0.0)):
             self.logger.debug("main: Teleporting...")
             self._transporttype = 0
             self._communicator.set_location(
@@ -614,6 +614,9 @@ class WorkerQuests(MITMBase):
 
         gmo_cells: list = latest.get(PROTO_NUMBER_FOR_GMO).get("values", {}).get("payload", {}).get("cells",
                                                                                                     None)
+        pdlocation = latest.get("location", Location(0, 0))
+        pdlocation = Location(0, 0) if not pdlocation else pdlocation
+
         if gmo_cells == list():
             self.logger.warning("Can't spin stop - no map info in GMO!")
             self._spinnable_data_failure()
@@ -631,8 +634,7 @@ class WorkerQuests(MITMBase):
                 longitude: float = fort.get("longitude", 0.0)
                 if latitude == 0.0 or longitude == 0.0:
                     continue
-                elif (abs(self.current_location.lat - latitude) > 0.00003 or
-                      abs(self.current_location.lng - longitude) > 0.00003):
+                elif (abs(pdlocation.lat - latitude) > 0.00003 or abs(pdlocation.lng - longitude) > 0.00003):
                     continue
 
                 fort_type: int = fort.get("type", 0)
@@ -662,7 +664,7 @@ class WorkerQuests(MITMBase):
                 return fort_type == 1 and enabled and not closed and cooldown == 0, False
         # by now we should've found the stop in the GMO
         # TODO: consider counter in DB for stop and delete if N reached, reset when updating with GMO
-        self.logger.warning("Can't spin stop - couldn't find it closeby!")
+        self.logger.warning("Unable to confirm the stop being spinnable - likely not standing exactly on top ...")
         self._spinnable_data_failure()
         return False, False
 
@@ -672,22 +674,23 @@ class WorkerQuests(MITMBase):
 
         # let's first check the GMO for the stop we intend to visit and abort if it's disabled, a gym, whatsoever
         spinnable_stop, skip_recheck = self._current_position_has_spinnable_stop(timestamp)
+
+        recheck_count = 0
+        while not spinnable_stop and not skip_recheck and not recheck_count > 2:
+            recheck_count += 1
+            self.logger.info("Wait for new data to check the stop again ... (attempt {})", recheck_count + 1)
+            data_received = self._wait_for_data(timestamp=time.time(), proto_to_wait_for=106, timeout=35)
+            if data_received != LatestReceivedType.UNDEFINED:
+                spinnable_stop, skip_recheck = self._current_position_has_spinnable_stop(timestamp)
+
         if not spinnable_stop:
-            if not skip_recheck:
-                # wait for GMO in case we moved too far away
-                data_received = self._wait_for_data(
-                    timestamp=timestamp, proto_to_wait_for=106, timeout=35)
-                if data_received != LatestReceivedType.UNDEFINED:
-                    spinnable_stop, _ = self._current_position_has_spinnable_stop(timestamp)
-                    if not spinnable_stop:
-                        self.logger.info("Stop {}, {} considered to be ignored in the next round due to failed "
-                                         "spinnable check", self.current_location.lat, self.current_location.lng)
-                        self._mapping_manager.routemanager_add_coords_to_be_removed(self._routemanager_name,
-                                                                                    self.current_location.lat,
-                                                                                    self.current_location.lng)
-                        return None
-            else:
-                return None
+            self.logger.info("Stop {}, {} considered to be ignored in the next round due to failed "
+                             "spinnable check", self.current_location.lat, self.current_location.lng)
+            self._mapping_manager.routemanager_add_coords_to_be_removed(self._routemanager_name,
+                                                                        self.current_location.lat,
+                                                                        self.current_location.lng)
+            return None
+
         while data_received != LatestReceivedType.STOP and int(to) < 3:
             self._stop_process_time = math.floor(time.time())
             self._waittime_without_delays = self._stop_process_time
@@ -786,8 +789,7 @@ class WorkerQuests(MITMBase):
                         self.clear_thread_task = ClearThreadTasks.QUEST
                     break
 
-            elif (data_received == FortSearchResultTypes.TIME or data_received ==
-                  FortSearchResultTypes.OUT_OF_RANGE):
+            elif (data_received == FortSearchResultTypes.TIME or data_received == FortSearchResultTypes.OUT_OF_RANGE):
                 self.logger.warning('Softban - return to main screen and open again...')
                 on_main_menu = self._check_pogo_main_screen(10, False)
                 if not on_main_menu:
