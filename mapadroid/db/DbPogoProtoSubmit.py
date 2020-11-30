@@ -1,5 +1,6 @@
 import json
 import time
+import math
 from datetime import datetime, timedelta
 from bitstring import BitArray
 from mapadroid.db.PooledQueryExecutor import PooledQueryExecutor
@@ -20,8 +21,9 @@ class DbPogoProtoSubmit:
     """
     default_spawndef = 240
 
-    def __init__(self, db_exec: PooledQueryExecutor):
+    def __init__(self, db_exec: PooledQueryExecutor, cache):
         self._db_exec: PooledQueryExecutor = db_exec
+        self._cache = cache
 
     def mons(self, origin: str, timestamp: float, map_proto: dict, mitm_mapper):
         """
@@ -71,6 +73,10 @@ class DbPogoProtoSubmit:
                     origin_logger.debug3("adding mon (#{}) at {}, {}. Despawns at {} (non-init) ({})", mon_id, lat, lon,
                                          despawn_time, spawnid)
 
+                cache_key = "mon" + encounter_id
+                if self._cache.exists(cache_key):
+                    continue
+
                 mon_args.append(
                     (
                         encounter_id, spawnid, mon_id, lat, lon,
@@ -84,6 +90,9 @@ class DbPogoProtoSubmit:
                         wild_mon["pokemon_data"]["display"]["form_value"]
                     )
                 )
+
+                cache_time = despawn_time_unix - int(datetime.utcnow().timestamp())
+                self._cache.set(cache_key, 1, ex=cache_time)
 
         self._db_exec.executemany(query_mons, mon_args, commit=True)
         return True
@@ -112,9 +121,15 @@ class DbPogoProtoSubmit:
         pokemon_data = wild_pokemon.get("pokemon_data")
         encounter_id = wild_pokemon["encounter_id"]
         shiny = wild_pokemon["pokemon_data"]["display"].get("is_shiny", 0)
+        pokemon_display = pokemon_data.get("display", {})
+        weather_boosted = pokemon_display.get('weather_boosted_value', None)
 
         if encounter_id < 0:
             encounter_id = encounter_id + 2 ** 64
+
+        cache_key = "moniv" + encounter_id + weather_boosted
+        if self._cache.exists(cache_key):
+            return
 
         mitm_mapper.collect_mon_iv_stats(origin, encounter_id, int(shiny))
 
@@ -129,8 +144,6 @@ class DbPogoProtoSubmit:
         capture_probability_list = capture_probability.get("capture_probability_list")
         if capture_probability_list is not None:
             capture_probability_list = capture_probability_list.replace("[", "").replace("]", "").split(",")
-
-        pokemon_display = pokemon_data.get("display", {})
 
         # ditto detector
         if is_mon_ditto(origin_logger, pokemon_data):
@@ -182,13 +195,15 @@ class DbPogoProtoSubmit:
             float(capture_probability_list[1]),
             float(capture_probability_list[2]),
             None, None,
-            pokemon_display.get('weather_boosted_value', None),
+            weather_boosted,
             now,
             pokemon_display.get("costume_value", None),
             form
         )
 
         self._db_exec.execute(query, insert_values, commit=True)
+        cache_time = despawn_time_unix - datetime.utcnow().timestamp()
+        self._cache.set(cache_key, 1, ex=cache_time)
         origin_logger.debug3("Done updating mon in DB")
         return True
 
@@ -303,8 +318,12 @@ class DbPogoProtoSubmit:
         for cell in cells:
             for fort in cell["forts"]:
                 if fort["type"] == 1:
-                    stops_args.append(
-                        self._extract_args_single_stop(fort))
+                    stop = self._extract_args_single_stop(fort)
+                    alt_modified_time = int(math.ceil(datetime.utcnow().timestamp() / 1000)) * 1000
+                    cache_key = "stop" + fort["id"] + fort.get("last_modified_timestamp_ms", alt_modified_time)
+                    if self._cache.exists(cache_key):
+                        continue
+                    stops_args.append(stop)
 
         self._db_exec.executemany(query_stops, stops_args, commit=True)
         return True
@@ -326,8 +345,12 @@ class DbPogoProtoSubmit:
         )
 
         stop_args = self._extract_args_single_stop_details(stop_proto)
-
         if stop_args is not None:
+            alt_modified_time = int(math.ceil(datetime.utcnow().timestamp() / 1000)) * 1000
+            cache_key = ("stopdetail" + stop_proto["id"] +
+                         stop_proto.get("last_modified_timestamp_ms", alt_modified_time))
+            if self._cache.exists(cache_key):
+                return
             self._db_exec.execute(query_stops, stop_args, commit=True)
         return True
 
@@ -443,6 +466,10 @@ class DbPogoProtoSubmit:
                         last_modified_ts).strftime("%Y-%m-%d %H:%M:%S")
                     is_ex_raid_eligible = gym["gym_details"]["is_ex_raid_eligible"]
 
+                    cache_key = "gym" + gymid + last_modified_ts
+                    if self._cache.exists(cache_key):
+                        continue
+
                     gym_args.append(
                         (
                             gymid, team_id, guard_pokemon_id, slots_available,
@@ -459,9 +486,10 @@ class DbPogoProtoSubmit:
                     gym_details_args.append(
                         (gym["id"], "unknown", gym["image_url"], now)
                     )
+
+                    self._cache.set(cache_key, 1, ex=900)
         self._db_exec.executemany(query_gym, gym_args, commit=True)
         self._db_exec.executemany(query_gym_details, gym_details_args, commit=True)
-        origin_logger.debug3("submit_gyms done")
         return True
 
     def gym(self, origin: str, map_proto: dict):
@@ -573,6 +601,10 @@ class DbPogoProtoSubmit:
                     origin_logger.debug3("Adding/Updating gym {} with level {} ending at {}", gymid, level,
                                          raidend_date)
 
+                    cache_key = "raid" + gymid + pokemon_id + raid_end_sec
+                    if self._cache.exists(cache_key):
+                        continue
+
                     raid_args.append(
                         (
                             gymid,
@@ -588,6 +620,9 @@ class DbPogoProtoSubmit:
                             evolution
                         )
                     )
+
+                    self._cache.set(cache_key, 1, ex=900)
+
         self._db_exec.executemany(query_raid, raid_args, commit=True)
         origin_logger.debug3("DbPogoProtoSubmit::raids: Done submitting raids with data received")
         return True
@@ -616,10 +651,15 @@ class DbPogoProtoSubmit:
         list_of_weather_args = []
         for client_weather in map_proto["client_weather"]:
             time_of_day = map_proto.get("time_of_day_value", 0)
-            list_of_weather_args.append(
-                self._extract_args_single_weather(
-                    client_weather, time_of_day, received_timestamp)
-            )
+            weather = self._extract_args_single_weather(client_weather, time_of_day, received_timestamp)
+
+            cache_key = ("weather" + weather[0] + weather[4] +
+                         weather[5] + weather[6] + weather[7] + weather[8] + weather[9])
+            if self._cache.exists(cache_key):
+                continue
+
+            list_of_weather_args.append(weather)
+            self._cache.set(cache_key, 1, ex=900)
         self._db_exec.executemany(query_weather, list_of_weather_args, commit=True)
         return True
 
