@@ -8,6 +8,7 @@ from mapadroid.utils.gamemechanicutil import gen_despawn_timestamp, is_mon_ditto
 from mapadroid.utils.questGen import questtask
 from mapadroid.utils.s2Helper import S2Helper
 from mapadroid.utils.logging import get_logger, LoggerEnums, get_origin_logger
+from mapadroid.utils.noopcache import NoopCache
 
 
 logger = get_logger(LoggerEnums.database)
@@ -21,14 +22,33 @@ class DbPogoProtoSubmit:
     """
     default_spawndef = 240
 
-    def __init__(self, db_exec: PooledQueryExecutor, cache):
+    def __init__(self, db_exec: PooledQueryExecutor, args):
         self._db_exec: PooledQueryExecutor = db_exec
-        self._cache = cache
+        self._application_args = args
+
+
+    def _get_cache(self):
+        cache = NoopCache()
+        if self._application_args.enable_cache:
+            try:
+                import redis
+                cache = redis.Redis(host=args.cache_host, port=args.cache_port, db=args.cache_database)
+                cache.ping()
+            except ImportError:
+                logger.error("Cache enabled but redis dependency not installed. Continuing without cache")
+            except redis.exceptions.ConnectionError:
+                logger.error("Unable to connect to Redis server. Continouing without cache")
+            except Exception:
+                logger.error("Unknown error while enabling cache. Continuing without cache")
+        return cache
+
+
 
     def mons(self, origin: str, timestamp: float, map_proto: dict, mitm_mapper):
         """
         Update/Insert mons from a map_proto dict
         """
+        cache = self._get_cache()
         origin_logger = get_origin_logger(logger, origin=origin)
         origin_logger.debug3("DbPogoProtoSubmit::mons called with data received")
         cells = map_proto.get("cells", None)
@@ -74,7 +94,7 @@ class DbPogoProtoSubmit:
                                          despawn_time, spawnid)
 
                 cache_key = "mon{}".format(encounter_id)
-                if self._cache.exists(cache_key):
+                if cache.exists(cache_key):
                     continue
 
                 mon_args.append(
@@ -92,7 +112,7 @@ class DbPogoProtoSubmit:
                 )
 
                 cache_time = despawn_time_unix - int(datetime.utcnow().timestamp())
-                self._cache.set(cache_key, 1, ex=cache_time)
+                cache.set(cache_key, 1, ex=cache_time)
 
         self._db_exec.executemany(query_mons, mon_args, commit=True)
         return True
@@ -102,6 +122,7 @@ class DbPogoProtoSubmit:
         Update/Insert a mon with IVs
         """
         origin_logger = get_origin_logger(logger, origin=origin)
+        cache = self._get_cache()
         wild_pokemon = encounter_proto.get("wild_pokemon", None)
         if wild_pokemon is None or wild_pokemon.get("encounter_id", 0) == 0 or not str(wild_pokemon["spawnpoint_id"]):
             return
@@ -128,7 +149,7 @@ class DbPogoProtoSubmit:
             encounter_id = encounter_id + 2 ** 64
 
         cache_key = "moniv{}{}".format(encounter_id, weather_boosted)
-        if self._cache.exists(cache_key):
+        if cache.exists(cache_key):
             return
 
         mitm_mapper.collect_mon_iv_stats(origin, encounter_id, int(shiny))
@@ -203,7 +224,7 @@ class DbPogoProtoSubmit:
 
         self._db_exec.execute(query, insert_values, commit=True)
         cache_time = despawn_time_unix - datetime.utcnow().timestamp()
-        self._cache.set(cache_key, 1, ex=cache_time)
+        cache.set(cache_key, 1, ex=cache_time)
         origin_logger.debug3("Done updating mon in DB")
         return True
 
@@ -299,6 +320,7 @@ class DbPogoProtoSubmit:
         Update/Insert pokestops from a map_proto dict
         """
         origin_logger = get_origin_logger(logger, origin=origin)
+        cache = self._get_cache()
         origin_logger.debug3("DbPogoProtoSubmit::stops called with data received")
         cells = map_proto.get("cells", None)
         if cells is None:
@@ -321,7 +343,7 @@ class DbPogoProtoSubmit:
                     stop = self._extract_args_single_stop(fort)
                     alt_modified_time = int(math.ceil(datetime.utcnow().timestamp() / 1000)) * 1000
                     cache_key = "stop{}{}".format(fort["id"], fort.get("last_modified_timestamp_ms", alt_modified_time))
-                    if self._cache.exists(cache_key):
+                    if cache.exists(cache_key):
                         continue
                     stops_args.append(stop)
 
@@ -335,6 +357,7 @@ class DbPogoProtoSubmit:
         :return:
         """
         logger.debug3("DbPogoProtoSubmit::pokestops_details called")
+        cache = self._get_cache()
 
         query_stops = (
             "INSERT INTO pokestop (pokestop_id, enabled, latitude, longitude, last_modified, "
@@ -349,7 +372,7 @@ class DbPogoProtoSubmit:
             alt_modified_time = int(math.ceil(datetime.utcnow().timestamp() / 1000)) * 1000
             cache_key = "stopdetail{}{}".format(stop_proto["id"],
                                                 stop_proto.get("last_modified_timestamp_ms", alt_modified_time))
-            if self._cache.exists(cache_key):
+            if cache.exists(cache_key):
                 return
             self._db_exec.execute(query_stops, stop_args, commit=True)
         return True
@@ -426,6 +449,7 @@ class DbPogoProtoSubmit:
         Update/Insert gyms from a map_proto dict
         """
         origin_logger = get_origin_logger(logger, origin=origin)
+        cache = self._get_cache()
         origin_logger.debug3("DbPogoProtoSubmit::gyms called with data received from")
         cells = map_proto.get("cells", None)
         if cells is None:
@@ -467,7 +491,7 @@ class DbPogoProtoSubmit:
                     is_ex_raid_eligible = gym["gym_details"]["is_ex_raid_eligible"]
 
                     cache_key = "gym{}{}".format(gymid, last_modified_ts)
-                    if self._cache.exists(cache_key):
+                    if cache.exists(cache_key):
                         continue
 
                     gym_args.append(
@@ -487,7 +511,7 @@ class DbPogoProtoSubmit:
                         (gym["id"], "unknown", gym["image_url"], now)
                     )
 
-                    self._cache.set(cache_key, 1, ex=900)
+                    cache.set(cache_key, 1, ex=900)
         self._db_exec.executemany(query_gym, gym_args, commit=True)
         self._db_exec.executemany(query_gym_details, gym_details_args, commit=True)
         return True
@@ -539,6 +563,7 @@ class DbPogoProtoSubmit:
         Update/Insert raids from a map_proto dict
         """
         origin_logger = get_origin_logger(logger, origin=origin)
+        cache = self._get_cache()
         origin_logger.debug3("DbPogoProtoSubmit::raids called with data received")
         cells = map_proto.get("cells", None)
         if cells is None:
@@ -602,7 +627,7 @@ class DbPogoProtoSubmit:
                                          raidend_date)
 
                     cache_key = "raid{}{}".format(gymid, pokemon_id + raid_end_sec)
-                    if self._cache.exists(cache_key):
+                    if cache.exists(cache_key):
                         continue
 
                     raid_args.append(
@@ -621,7 +646,7 @@ class DbPogoProtoSubmit:
                         )
                     )
 
-                    self._cache.set(cache_key, 1, ex=900)
+                    cache.set(cache_key, 1, ex=900)
 
         self._db_exec.executemany(query_raid, raid_args, commit=True)
         origin_logger.debug3("DbPogoProtoSubmit::raids: Done submitting raids with data received")
@@ -632,6 +657,7 @@ class DbPogoProtoSubmit:
         Update/Insert weather from a map_proto dict
         """
         origin_logger = get_origin_logger(logger, origin=origin)
+        cache = self._get_cache()
         origin_logger.debug3("DbPogoProtoSubmit::weather called with data received")
         cells = map_proto.get("cells", None)
         if cells is None:
@@ -655,11 +681,11 @@ class DbPogoProtoSubmit:
 
             cache_key = "weather{}{}{}{}{}{}{}".format(weather[0], weather[4], weather[5], weather[6],
                                                        weather[7], weather[8], weather[9])
-            if self._cache.exists(cache_key):
+            if cache.exists(cache_key):
                 continue
 
             list_of_weather_args.append(weather)
-            self._cache.set(cache_key, 1, ex=900)
+            cache.set(cache_key, 1, ex=900)
         self._db_exec.executemany(query_weather, list_of_weather_args, commit=True)
         return True
 
