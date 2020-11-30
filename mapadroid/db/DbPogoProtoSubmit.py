@@ -626,7 +626,7 @@ class DbPogoProtoSubmit:
                     origin_logger.debug3("Adding/Updating gym {} with level {} ending at {}", gymid, level,
                                          raidend_date)
 
-                    cache_key = "raid{}{}".format(gymid, pokemon_id + raid_end_sec)
+                    cache_key = "raid{}{}".format(gymid, pokemon_id, raid_end_sec)
                     if cache.exists(cache_key):
                         continue
 
