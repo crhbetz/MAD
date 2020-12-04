@@ -1,7 +1,7 @@
 import math
 import time
 from datetime import datetime
-from typing import Union
+from typing import Union, Tuple, Optional
 
 from mapadroid.db.DbWrapper import DbWrapper
 from mapadroid.mitm_receiver.MitmMapper import MitmMapper
@@ -43,7 +43,10 @@ class WorkerMITM(MITMBase):
 
     def _post_move_location_routine(self, timestamp):
         # TODO: pass the appropiate proto number if IV?
-        self._wait_for_data(timestamp)
+        type_received, data = self._wait_for_data(timestamp)
+        if type_received != LatestReceivedType.GMO:
+            self.logger.warning("Worker failed to retrieve proper data at {}, {}. Worker will continue with "
+                                "the next location", self.current_location.lat, self.current_location.lng)
 
     def _move_around(self):
         walk_distance_post_teleport = self.get_devicesettings_value('walk_after_teleport_distance', 0)
@@ -100,7 +103,7 @@ class WorkerMITM(MITMBase):
             self._communicator.set_location(
                 Location(self.current_location.lat, self.current_location.lng), 0)
             # the time we will take as a starting point to wait for data...
-            cur_time = math.floor(time.time())
+            timestamp_to_use = math.floor(time.time())
 
             delay_used = self.get_devicesettings_value('post_teleport_delay', 0)
             # Test for cooldown / teleported distance TODO: check this block...
@@ -141,9 +144,20 @@ class WorkerMITM(MITMBase):
         else:
             self.logger.info("main: Walking...")
             self._transporttype = 1
+            time_before_walk = math.floor(time.time())
             self._communicator.walk_from_to(self.last_location, self.current_location, speed)
-            # the time we will take as a starting point to wait for data...
-            cur_time = math.floor(time.time())
+            # We need to roughly estimate when data could have been available, just picking half way for now, distance
+            # check should do the rest...
+            timestamp_to_use = math.floor(time.time())
+            if timestamp_to_use - 10 < time_before_walk:
+                # duration of walk was rather short, let's go with that...
+                timestamp_to_use = time_before_walk
+            elif math.floor((math.floor(time.time()) + time_before_walk) / 2) < timestamp_to_use - 10:
+                # half way through the walk was earlier than 10s in the past, just gonna go with magic numbers once more
+                timestamp_to_use -= 10
+            else:
+                # half way through was within the last 10s, we can use that to check for data afterwards
+                timestamp_to_use = math.floor((math.floor(time.time()) + time_before_walk) / 2)
             self.logger.debug2("Done walking, fetching time to sleep")
             delay_used = self.get_devicesettings_value('post_walk_delay', 0)
         self.logger.debug2("Sleeping for {}s", delay_used)
@@ -151,7 +165,7 @@ class WorkerMITM(MITMBase):
         self.set_devicesettings_value("last_location", self.current_location)
         self.last_location = self.current_location
         self._waittime_without_delays = time.time()
-        return cur_time, True
+        return timestamp_to_use, True
 
     def _pre_location_update(self):
         self.__update_injection_settings()
@@ -227,72 +241,56 @@ class WorkerMITM(MITMBase):
         self._mitm_mapper.update_latest(origin=self._origin, key="ids_iv", values_dict=ids_iv)
         self._mitm_mapper.update_latest(origin=self._origin, key="injected_settings", values_dict=injected_settings)
 
-    def _wait_data_worker(self, latest, proto_to_wait_for, timestamp):
-        data_requested: Union[LatestReceivedType, dict] = LatestReceivedType.UNDEFINED
-        if latest is None:
-            self.logger.debug("Nothing received from since MAD started")
-            time.sleep(0.5)
-        elif proto_to_wait_for not in latest:
+    def _check_for_data_content(self, latest_data, proto_to_wait_for: int, timestamp: float) \
+            -> Tuple[LatestReceivedType, Optional[object]]:
+        type_of_data_found: LatestReceivedType = LatestReceivedType.UNDEFINED
+        data_found: Optional[object] = None
+        latest_proto_entry = latest_data.get(proto_to_wait_for, None)
+        if not latest_proto_entry:
             self.logger.debug("No data linked to the requested proto since MAD started.")
-            time.sleep(0.5)
-        else:
-            # proto has previously been received, let's check the timestamp...
-            # TODO: int vs str-key?
-            latest_proto = latest.get(proto_to_wait_for, None)
+            return type_of_data_found, data_found
 
-            mode = self._mapping_manager.routemanager_get_mode(self._routemanager_name)
-            latest_timestamp = latest_proto.get("timestamp", 0)
-            self.logger.debug("Latest timestamp: {} vs. timestamp waited for: {} of proto {}",
-                              datetime.fromtimestamp(latest_timestamp), datetime.fromtimestamp(timestamp),
-                              proto_to_wait_for)
-            if latest_timestamp >= timestamp:
-                # TODO: consider reseting timestamp here since we clearly received SOMETHING
-                latest_data: dict = latest_proto.get("values", None)
-                if latest_data is None:
-                    time.sleep(0.5)
-                    return LatestReceivedType.UNDEFINED
-                elif mode in ["mon_mitm", "iv_mitm"]:
-                    # check if the GMO contains mons
-                    for data_extract in latest_data['payload']['cells']:
-                        for pokemon in data_extract['wild_pokemon']:
-                            # TODO: teach Prio Q / Clusterer to hold additional data such as mon/encounter IDs
-                            # if there's location in latest, the distance has
-                            # already been checked in MITMBase
-                            if pokemon['spawnpoint_id'] and (latest.get("location", None) or
-                                                             self._check_data_distance(
-                                                                 latest_data['payload']['cells'])):
-                                data_requested = latest_data
-                                break
-                        if data_requested != LatestReceivedType.UNDEFINED:
-                            break
-                    if data_requested is None or data_requested == LatestReceivedType.UNDEFINED:
-                        self.logger.debug("No spawnpoints in data requested")
-                        time.sleep(1)
-                elif mode in ["raids_mitm"]:
-                    self.logger.debug("Checking raids_mitm data")
-                    for data_extract in latest_data['payload']['cells']:
-                        for forts in data_extract['forts']:
-                            # if there's location in latest, the distance has
-                            # already been checked in MITMBase
-                            if forts['id'] and (latest.get("location", None) or
-                                                self._check_data_distance(latest_data['payload']['cells'])):
-                                self.logger.debug("Got proper fort data for raids")
-                                data_requested = latest_data
-                                break
-                        if data_requested != LatestReceivedType.UNDEFINED:
-                            break
-                    if data_requested is None or data_requested == LatestReceivedType.UNDEFINED:
-                        self.logger.debug("No forts in data received: {}", latest_data)
-                        time.sleep(0.5)
-                    else:
-                        self.logger.debug("Got data requested: {}", data_requested)
-                else:
-                    self.logger.warning("No mode specified to wait for - this should not even happen...")
-                    time.sleep(0.5)
+        # proto has previously been received, let's check the timestamp...
+        mode = self._mapping_manager.routemanager_get_mode(self._routemanager_name)
+        timestamp_of_proto: float = latest_proto_entry.get("timestamp", None)
+        self.logger.debug("Latest timestamp: {} vs. timestamp waited for: {} of proto {}",
+                          datetime.fromtimestamp(timestamp_of_proto), datetime.fromtimestamp(timestamp),
+                          proto_to_wait_for)
+        if timestamp_of_proto < timestamp:
+            self.logger.debug("latest timestamp of proto {} ({}) is older than {}", proto_to_wait_for,
+                              timestamp_of_proto, timestamp)
+            # TODO: timeout error instead of data_error_counter? Differentiate timeout vs missing data (the
+            # TODO: latter indicates too high speeds for example
+            return type_of_data_found, data_found
+
+        latest_proto_data: dict = latest_proto_entry.get("values", None)
+        if latest_proto_data is None:
+            return LatestReceivedType.UNDEFINED, data_found
+        latest_proto = latest_proto_data.get("payload")
+        if mode in ["mon_mitm", "iv_mitm"]:
+            self.logger.debug("Checking GMO for mons")
+            # Now check if there are wild mons...
+            # TODO: Should we check if there are any spawnpoints? Wild mons could not be present in forests etc...
+            amount_of_wild_mons: int = 0
+            for cell in latest_proto['cells']:
+                amount_of_wild_mons += len(cell['wild_pokemon'])
+            if amount_of_wild_mons > 0:
+                data_found = latest_proto
+                type_of_data_found = LatestReceivedType.GMO
             else:
-                self.logger.debug("latest timestamp of proto {} ({}) is older than {}", proto_to_wait_for,
-                                  latest_timestamp, timestamp)
-                # TODO: timeout error instead of data_error_counter? Differentiate timeout vs missing data (the
-                # TODO: latter indicates too high speeds for example
-                time.sleep(0.5)
-        return data_requested
+                self.logger.debug("No wild mons in GMO")
+        elif mode in ["raids_mitm"]:
+            self.logger.debug("Checking GMO for forts")
+            amount_of_forts: int = 0
+            for cell in latest_proto['cells']:
+                amount_of_forts += len(cell['forts'])
+            if amount_of_forts > 0:
+                data_found = latest_proto
+                type_of_data_found = LatestReceivedType.GMO
+            else:
+                self.logger.debug("No forts in GMO")
+        else:
+            self.logger.warning("No mode specified to wait for - this should not even happen...")
+            time.sleep(0.5)
+
+        return type_of_data_found, data_found
