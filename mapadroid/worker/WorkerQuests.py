@@ -4,29 +4,36 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from enum import Enum
 from threading import Event, Thread
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Dict
+
+from s2sphere import CellId
+
 from mapadroid.db.DbWrapper import DbWrapper
 from mapadroid.mitm_receiver.MitmMapper import MitmMapper
 from mapadroid.ocr.pogoWindows import PogoWindows
 from mapadroid.utils import MappingManager
+from mapadroid.utils.ProtoIdentifier import ProtoIdentifier
 from mapadroid.utils.collections import Location
-from mapadroid.utils.geo import (
-    get_distance_of_two_points_in_meters,
-    get_lat_lng_offsets_by_distance
-)
+from mapadroid.utils.gamemechanicutil import calculate_cooldown
+from mapadroid.utils.geo import get_distance_of_two_points_in_meters
 from mapadroid.utils.madGlobals import (
     InternalStopWorkerException,
     WebsocketWorkerRemovedException,
     WebsocketWorkerTimeoutException,
     WebsocketWorkerConnectionClosedException
 )
+from mapadroid.utils.s2Helper import S2Helper
 from mapadroid.websocket.AbstractCommunicator import AbstractCommunicator
 from mapadroid.worker.MITMBase import MITMBase, LatestReceivedType
 from mapadroid.utils.logging import get_logger, LoggerEnums
 from mapadroid.worker.WorkerBase import FortSearchResultTypes
 
+# The diff to lat/lng values to consider that the worker is standing on top of the stop
+S2_GMO_CELL_LEVEL = 15
+RADIUS_FOR_CELLS_CONSIDERED_FOR_STOP_SCAN = 35
+DISTANCE_TO_STOP_TO_CONSIDER_ON_TOP = 0.00006
+
 logger = get_logger(LoggerEnums.worker)
-PROTO_NUMBER_FOR_GMO = 106
 
 
 class ClearThreadTasks(Enum):
@@ -127,21 +134,8 @@ class WorkerQuests(MITMBase):
         self._update_injection_settings()
 
     def _move_to_location(self):
-        if not self._mapping_manager.routemanager_present(self._routemanager_name) \
-                or self._stop_worker_event.is_set():
-            raise InternalStopWorkerException
+        distance, routemanager_settings = self._get_route_manager_settings_and_distance_to_current_location()
 
-        routemanager_settings = self._mapping_manager.routemanager_get_settings(self._routemanager_name)
-
-        distance = get_distance_of_two_points_in_meters(float(self.last_location.lat),
-                                                        float(
-                                                            self.last_location.lng),
-                                                        float(
-                                                            self.current_location.lat),
-                                                        float(self.current_location.lng))
-        self.logger.debug('Moving {} meters to the next position', round(distance, 2))
-
-        delay_used = 0
         self.logger.debug("Getting time")
         speed = routemanager_settings.get("speed", 0)
         max_distance = routemanager_settings.get("max_distance", None)
@@ -160,129 +154,19 @@ class WorkerQuests(MITMBase):
             if self.last_location.lat == 0.0 and self.last_location.lng == 0.0:
                 self.logger.info('Starting fresh round - using lower delay')
             else:
-                if distance >= 1335000:
-                    speed = 180.43  # Speed can be abt 650 km/h
-                elif distance >= 1100000:
-                    speed = 176.2820513
-                elif distance >= 1020000:
-                    speed = 168.3168317
-                elif distance >= 1007000:
-                    speed = 171.2585034
-                elif distance >= 948000:
-                    speed = 166.3157895
-                elif distance >= 900000:
-                    speed = 164.8351648
-                elif distance >= 897000:
-                    speed = 166.1111111
-                elif distance >= 839000:
-                    speed = 158.9015152
-                elif distance >= 802000:
-                    speed = 159.1269841
-                elif distance >= 751000:
-                    speed = 152.6422764
-                elif distance >= 700000:
-                    speed = 151.5151515
-                elif distance >= 650000:
-                    speed = 146.3963964
-                elif distance >= 600000:
-                    speed = 142.8571429
-                elif distance >= 550000:
-                    speed = 138.8888889
-                elif distance >= 500000:
-                    speed = 134.4086022
-                elif distance >= 450000:
-                    speed = 129.3103448
-                elif distance >= 400000:
-                    speed = 123.4567901
-                elif distance >= 350000:
-                    speed = 116.6666667
-                elif distance >= 328000:
-                    speed = 113.8888889
-                elif distance >= 300000:
-                    speed = 108.6956522
-                elif distance >= 250000:
-                    speed = 101.6260163
-                elif distance >= 201000:
-                    speed = 90.54054054
-                elif distance >= 175000:
-                    speed = 85.78431373
-                elif distance >= 150000:
-                    speed = 78.125
-                elif distance >= 125000:
-                    speed = 71.83908046
-                elif distance >= 100000:
-                    speed = 64.1025641
-                elif distance >= 90000:
-                    speed = 60
-                elif distance >= 80000:
-                    speed = 55.55555556
-                elif distance >= 70000:
-                    speed = 50.72463768
-                elif distance >= 60000:
-                    speed = 47.61904762
-                elif distance >= 45000:
-                    speed = 39.47368421
-                elif distance >= 40000:
-                    speed = 35.0877193
-                elif distance >= 35000:
-                    speed = 32.40740741
-                elif distance >= 30000:
-                    speed = 29.41176471
-                elif distance >= 25000:
-                    speed = 27.77777778
-                elif distance >= 20000:
-                    speed = 27.77777778
-                elif distance >= 15000:
-                    speed = 27.77777778
-                elif distance >= 10000:
-                    speed = 23.80952381
-                elif distance >= 8000:
-                    speed = 26.66666667
-                elif distance >= 5000:
-                    speed = 22.34137623
-                elif distance >= 4000:
-                    speed = 22.22222222
-
-                delay_used = distance / speed
-
-                if delay_used > 7200:  # There's a maximum of 2 hours wait time
-                    delay_used = 7200
+                delay_used = calculate_cooldown(distance, speed)
             self.logger.debug(
                 "Need more sleep after Teleport: {} seconds!", int(delay_used))
         else:
             delay_used = distance / (speed / 3.6)  # speed is in kmph , delay_used need mps
             self.logger.info("main: Walking {} m, this will take {} seconds", distance, delay_used)
-            self._transporttype = 1
-            self._communicator.walk_from_to(self.last_location, self.current_location, speed)
-            # the time we will take as a starting point to wait for data...
-            cur_time = math.floor(time.time())
+            cur_time = self._walk_to_location(speed)
+
             delay_used = self.get_devicesettings_value('post_walk_delay', 0)
         walk_distance_post_teleport = self.get_devicesettings_value('walk_after_teleport_distance', 0)
         if 0 < walk_distance_post_teleport < distance:
             # TODO: actually use to_walk for distance
-            lat_offset, lng_offset = get_lat_lng_offsets_by_distance(
-                walk_distance_post_teleport)
-
-            to_walk = get_distance_of_two_points_in_meters(float(self.current_location.lat),
-                                                           float(
-                                                               self.current_location.lng),
-                                                           float(
-                                                               self.current_location.lat) + lat_offset,
-                                                           float(self.current_location.lng) + lng_offset)
-            self.logger.info("Walking roughly: {:.2f}m", to_walk)
-            time.sleep(0.3)
-            self._communicator.walk_from_to(self.current_location,
-                                            Location(self.current_location.lat + lat_offset,
-                                                     self.current_location.lng + lng_offset),
-                                            11)
-            self.logger.debug("Walking back")
-            time.sleep(0.3)
-            self._communicator.walk_from_to(Location(self.current_location.lat + lat_offset,
-                                                     self.current_location.lng + lng_offset),
-                                            self.current_location,
-                                            11)
-            self.logger.debug("Done walking")
-            time.sleep(1)
+            to_walk = self._walk_after_teleport(walk_distance_post_teleport)
             delay_used -= (to_walk / 3.05) - 1.  # We already waited for a bit because of this walking part
             if delay_used < 0:
                 delay_used = 0
@@ -383,7 +267,7 @@ class WorkerQuests(MITMBase):
 
                 self.logger.info('Open Stop')
                 self._stop_process_time = math.floor(time.time())
-                type_received: LatestReceivedType = self._open_pokestop(self._stop_process_time)
+                type_received: LatestReceivedType = self._try_to_open_pokestop(timestamp)
                 if type_received is not None and type_received == LatestReceivedType.STOP:
                     self._handle_stop(self._stop_process_time)
 
@@ -528,9 +412,9 @@ class WorkerQuests(MITMBase):
                         delx, dely = self._resocalc.get_confirm_delete_item_coords(self)
                         cur_time = time.time()
                         self._communicator.click(int(delx), int(dely))
-                        cur_time = time.time()
                         deletion_timeout = 35
-                        type_received, proto_entry = self._wait_for_data(timestamp=cur_time, proto_to_wait_for=4,
+                        type_received, proto_entry = self._wait_for_data(timestamp=cur_time,
+                                                                         proto_to_wait_for=ProtoIdentifier.INVENTORY,
                                                                          timeout=deletion_timeout)
 
                         if type_received != LatestReceivedType.UNDEFINED:
@@ -563,61 +447,63 @@ class WorkerQuests(MITMBase):
         injected_settings = {}
         scanmode = "quests"
         injected_settings["scanmode"] = scanmode
-        routemanager_settings = self._mapping_manager.routemanager_get_settings(self._routemanager_name)
         ids_iv: List[int] = []
-        if routemanager_settings is not None:
-            ids_iv = self._mapping_manager.get_monlist(routemanager_settings.get("mon_ids_iv", None),
-                                                       self._routemanager_name)
-        # if iv ids are specified we will sync the workers encountered ids to newest time.
-        if ids_iv is not None:
-            (self._latest_encounter_update, encounter_ids) = self._db_wrapper.update_encounters_from_db(
-                self._mapping_manager.routemanager_get_geofence_helper(self._routemanager_name),
-                self._latest_encounter_update)
-            if encounter_ids:
-                self.logger.debug("Found {} new encounter_ids", len(encounter_ids))
-                for encounter_id, disappear in encounter_ids.items():
-                    self.logger.debug("id: {}, despawn: {}", encounter_id, disappear)
-            self._encounter_ids = {**encounter_ids, **self._encounter_ids}
-            # allow one minute extra life time, because the clock on some devices differs, newer got why this problem
-            # apears but it is a fact.
-            max_age = time.time() - 60
-
-            remove = []
-            for key, value in self._encounter_ids.items():
-                if value < max_age:
-                    remove.append(key)
-                    self.logger.debug("removing encounterid: {} mon despawned", key)
-
-            for key in remove:
-                del self._encounter_ids[key]
-
-            self.logger.debug("Encounter list len: {}", len(self._encounter_ids))
-            # TODO: here we have the latest update of encountered mons.
-            # self._encounter_ids contains the complete dict.
-            # encounter_ids only contains the newest update.
+        self._encounter_ids = {}
         self._mitm_mapper.update_latest(origin=self._origin, key="ids_encountered", values_dict=self._encounter_ids)
         self._mitm_mapper.update_latest(origin=self._origin, key="ids_iv", values_dict=ids_iv)
 
         self._mitm_mapper.update_latest(origin=self._origin, key="injected_settings", values_dict=injected_settings)
 
-    def _current_position_has_spinnable_stop(self, timestamp: float):
-        type_received, data_received = self._wait_for_data(timestamp=timestamp, proto_to_wait_for=106)
-        if type_received == LatestReceivedType.UNDEFINED:
-            self._spinnable_data_failure()
-            return False, False
-        latest_proto = data_received.get("payload")
+    def _directly_surrounding_gmo_cells_containing_stops_around_current_position(self, gmo_cells) -> List:
+        """
+        Returns a list of cells containing forts
+        Args:
+            gmo_cells:
 
-        gmo_cells: list = latest_proto.get("cells", None)
-
-        if len(gmo_cells) == 0:
-            self.logger.warning("Can't spin stop - no map info in GMO!")
-            self._spinnable_data_failure()
-            return False, False
+        Returns:
+            List of cells that actually contain forts around the current position
+        """
+        cells_with_forts = []
+        if not gmo_cells:
+            self.logger.debug("No GMO cells passed for surrounding cell check")
+            return cells_with_forts
+        # 35m radius around current location (thus cells that may be touched by that radius hopefully get included)
+        s2cells_valid_around_location: List[CellId] = S2Helper.get_s2cells_from_circle(self.current_location.lat,
+                                                                                       self.current_location.lng,
+                                                                                       RADIUS_FOR_CELLS_CONSIDERED_FOR_STOP_SCAN,
+                                                                                       S2_GMO_CELL_LEVEL)
+        s2cell_ids_valid: List[str] = [s2cell.id() for s2cell in s2cells_valid_around_location]
         for cell in gmo_cells:
             # each cell contains an array of forts, check each cell for a fort with our current location (maybe +-
             # very very little jitter) and check its properties
+            if cell["id"] not in s2cell_ids_valid:
+                continue
             forts: list = cell.get("forts", None)
-            if forts is None or len(forts) == 0:
+            if forts:
+                cells_with_forts.append(cell)
+
+        if not cells_with_forts:
+            self.logger.warning("GMO cells around current position ({}) do not contain stops ",
+                                self.current_location)
+        return cells_with_forts
+
+    def _current_position_has_spinnable_stop(self, timestamp: float):
+        type_received, data_received = self._wait_for_data(timestamp=timestamp, proto_to_wait_for=ProtoIdentifier.GMO)
+        if type_received != LatestReceivedType.GMO or data_received is None:
+            self._spinnable_data_failure()
+            return False, False
+        latest_proto = data_received.get("payload")
+        gmo_cells: list = latest_proto.get("cells", None)
+
+        if not gmo_cells:
+            self.logger.warning("Can't spin stop - no map info in GMO!")
+            self._spinnable_data_failure()
+            return False, False
+
+        cells_with_stops = self._directly_surrounding_gmo_cells_containing_stops_around_current_position(gmo_cells)
+        for cell in cells_with_stops:
+            forts: list = cell.get("forts", None)
+            if not forts:
                 continue
 
             for fort in forts:
@@ -625,12 +511,14 @@ class WorkerQuests(MITMBase):
                 longitude: float = fort.get("longitude", 0.0)
                 if latitude == 0.0 or longitude == 0.0:
                     continue
-                elif (abs(self.current_location.lat - latitude) <= 0.00006
-                        and abs(self.current_location.lng - longitude) <= 0.00006):
+                elif (abs(self.current_location.lat - latitude) <= DISTANCE_TO_STOP_TO_CONSIDER_ON_TOP
+                      and abs(self.current_location.lng - longitude) <= DISTANCE_TO_STOP_TO_CONSIDER_ON_TOP):
                     # We are basically on top of a stop
                     self.logger.info("Found stop/gym at current location!")
                 else:
-                    self.logger.debug2("Found stop nearby but not next to us to be spinned")
+                    self.logger.debug2("Found stop nearby but not next to us to be spinned. Current lat, lng: {}, {}."
+                                       "Stop at {}, {}", self.current_location.lat, self.current_location.lng,
+                                       latitude, longitude)
                     continue
 
                 fort_type: int = fort.get("type", 0)
@@ -659,13 +547,13 @@ class WorkerQuests(MITMBase):
                 self._spinnable_data_failcount = 0
                 return fort_type == 1 and enabled and not closed and cooldown == 0, False
         # by now we should've found the stop in the GMO
-        # TODO: consider counter in DB for stop and delete if N reached, reset when updating with GMO
-        self.logger.warning("Unable to confirm the current location yielding a spinnable stop - likely not standing "
-                            "exactly on top ...")
-        self._spinnable_data_failcount = 0
+        self.logger.warning("Unable to confirm the current location ({}) yielding a spinnable stop "
+                            "- likely not standing exactly on top ...", str(self.current_location))
+        self._check_if_stop_was_nearby_and_update_location(gmo_cells)
+        self._spinnable_data_failure()
         return False, False
 
-    def _open_pokestop(self, timestamp: float) -> LatestReceivedType:
+    def _try_to_open_pokestop(self, timestamp: float) -> LatestReceivedType:
         to = 0
         type_received: LatestReceivedType = LatestReceivedType.UNDEFINED
         proto_entry = None
@@ -676,7 +564,9 @@ class WorkerQuests(MITMBase):
         while not spinnable_stop and not skip_recheck and not recheck_count > 2:
             recheck_count += 1
             self.logger.info("Wait for new data to check the stop again ... (attempt {})", recheck_count + 1)
-            type_received, proto_entry = self._wait_for_data(timestamp=time.time(), proto_to_wait_for=106, timeout=35)
+            type_received, proto_entry = self._wait_for_data(timestamp=time.time(),
+                                                             proto_to_wait_for=ProtoIdentifier.GMO,
+                                                             timeout=35)
             if type_received != LatestReceivedType.UNDEFINED:
                 spinnable_stop, skip_recheck = self._current_position_has_spinnable_stop(timestamp)
 
@@ -691,10 +581,10 @@ class WorkerQuests(MITMBase):
         while type_received != LatestReceivedType.STOP and int(to) < 3:
             self._stop_process_time = math.floor(time.time())
             self._waittime_without_delays = self._stop_process_time
-            self._open_gym(self._delay_add)
+            self._click_pokestop_at_current_location(self._delay_add)
             self.set_devicesettings_value('last_action_time', time.time())
             type_received, proto_entry = self._wait_for_data(
-                timestamp=self._stop_process_time, proto_to_wait_for=104, timeout=15)
+                timestamp=self._stop_process_time, proto_to_wait_for=ProtoIdentifier.FORT_DETAILS, timeout=15)
             if type_received == LatestReceivedType.GYM:
                 self.logger.info('Clicked GYM')
                 time.sleep(10)
@@ -731,7 +621,7 @@ class WorkerQuests(MITMBase):
         while data_received != FortSearchResultTypes.QUEST and int(to) < 4:
             self.logger.info('Spin Stop')
             type_received, data_received = self._wait_for_data(
-                timestamp=self._stop_process_time, proto_to_wait_for=101, timeout=timeout)
+                timestamp=self._stop_process_time, proto_to_wait_for=ProtoIdentifier.FORT_SEARCH, timeout=timeout)
 
             if (type_received == LatestReceivedType.FORT_SEARCH_RESULT
                     and data_received == FortSearchResultTypes.INVENTORY):
@@ -798,7 +688,7 @@ class WorkerQuests(MITMBase):
                 if not on_main_menu:
                     self._restart_pogo(mitm_mapper=self._mitm_mapper)
                 self._stop_process_time = math.floor(time.time())
-                if self._open_pokestop(self._stop_process_time) == LatestReceivedType.UNDEFINED:
+                if self._try_to_open_pokestop(self._stop_process_time) == LatestReceivedType.UNDEFINED:
                     return
             elif (type_received == LatestReceivedType.FORT_SEARCH_RESULT
                     and data_received == FortSearchResultTypes.FULL):
@@ -830,7 +720,7 @@ class WorkerQuests(MITMBase):
                 self._turn_map(self._delay_add)
                 time.sleep(1)
                 self._stop_process_time = math.floor(time.time())
-                if self._open_pokestop(self._stop_process_time) == LatestReceivedType.UNDEFINED:
+                if self._try_to_open_pokestop(self._stop_process_time) == LatestReceivedType.UNDEFINED:
                     return
                 to += 1
                 if to > 3:
@@ -838,18 +728,20 @@ class WorkerQuests(MITMBase):
 
         self.set_devicesettings_value('last_action_time', time.time())
 
-    def _check_for_data_content(self, latest, proto_to_wait_for: int, timestamp: float) \
+    def _check_for_data_content(self, latest, proto_to_wait_for: ProtoIdentifier, timestamp: float) \
             -> Tuple[LatestReceivedType, Optional[Union[dict, FortSearchResultTypes]]]:
         type_of_data_found: LatestReceivedType = LatestReceivedType.UNDEFINED
         data_found: Optional[object] = None
         # Check if we have clicked a gym or mon...
-        if 156 in latest and latest[156].get('timestamp', 0) >= timestamp:
+        if ProtoIdentifier.GYM_INFO.value in latest \
+                and latest[ProtoIdentifier.GYM_INFO.value].get('timestamp', 0) >= timestamp:
             type_of_data_found = LatestReceivedType.GYM
             return type_of_data_found, data_found
-        elif 102 in latest and latest[102].get('timestamp', 0) >= timestamp:
+        elif ProtoIdentifier.ENCOUNTER.value in latest \
+                and latest[ProtoIdentifier.ENCOUNTER.value].get('timestamp', 0) >= timestamp:
             type_of_data_found = LatestReceivedType.MON
             return type_of_data_found, data_found
-        elif proto_to_wait_for not in latest:
+        elif proto_to_wait_for.value not in latest:
             self.logger.debug("No data linked to the requested proto since MAD started.")
             return type_of_data_found, data_found
 
@@ -858,7 +750,7 @@ class WorkerQuests(MITMBase):
         # successful bag clear or last successful quest clear. This eliminates
         # the need to add arbitrary timedeltas for possible small delays,
         # which we don't do in other workers either
-        if proto_to_wait_for in [101, 104]:
+        if proto_to_wait_for in [ProtoIdentifier.FORT_SEARCH, ProtoIdentifier.FORT_DETAILS]:
             potential_replacements = [
                 self._latest_quest,
                 self.get_devicesettings_value('last_cleanup_time', 0),
@@ -871,7 +763,10 @@ class WorkerQuests(MITMBase):
                               proto_to_wait_for)
             timestamp = replacement
         # proto has previously been received, let's check the timestamp...
-        latest_proto_entry = latest.get(proto_to_wait_for, None)
+        latest_proto_entry = latest.get(proto_to_wait_for.value, None)
+        if not latest_proto_entry:
+            self.logger.debug("No data linked to the requested proto since MAD started.")
+            return type_of_data_found, data_found
         timestamp_of_proto = latest_proto_entry.get("timestamp", 0)
         if timestamp_of_proto < timestamp:
             self.logger.debug("latest timestamp of proto {} ({}) is older than {}", proto_to_wait_for,
@@ -885,12 +780,12 @@ class WorkerQuests(MITMBase):
         self.logger.debug4("Latest data received: {}", latest_proto_data)
         if latest_proto_data is None:
             return type_of_data_found, data_found
-        location_of_proto = latest_proto_data.get("location", None)
         latest_proto = latest_proto_data.get("payload", None)
+        self.logger.debug2("Checking for Quest related data in proto {}", proto_to_wait_for)
         if latest_proto is None:
             self.logger.debug("No proto data for {} at {} after {}", proto_to_wait_for,
                               timestamp_of_proto, timestamp)
-        elif proto_to_wait_for == 101:
+        elif proto_to_wait_for == ProtoIdentifier.FORT_SEARCH:
             quest_type: int = latest_proto.get('challenge_quest', {}) \
                                      .get('quest', {}) \
                                      .get('quest_type', False)
@@ -909,20 +804,16 @@ class WorkerQuests(MITMBase):
                 return LatestReceivedType.FORT_SEARCH_RESULT, FortSearchResultTypes.INVENTORY
             elif result == 5:
                 return LatestReceivedType.FORT_SEARCH_RESULT, FortSearchResultTypes.LIMIT
-        elif proto_to_wait_for == 104:
+        elif proto_to_wait_for == ProtoIdentifier.FORT_DETAILS:
             fort_type: int = latest_proto.get("type", 0)
             data_found = latest_proto
             type_of_data_found = LatestReceivedType.GYM if fort_type == 0 else LatestReceivedType.STOP
-        elif proto_to_wait_for == 106:
-            amount_of_forts: int = 0
-            for cell in latest_proto['cells']:
-                amount_of_forts += len(cell['forts'])
-            if amount_of_forts > 0:
-                data_found = latest_proto_data
-                type_of_data_found = LatestReceivedType.GMO
-            else:
-                self.logger.debug("No forts in GMO")
-        elif proto_to_wait_for == 4 and 'inventory_delta' in latest_proto and \
+        elif proto_to_wait_for == ProtoIdentifier.GMO \
+                and self._directly_surrounding_gmo_cells_containing_stops_around_current_position(
+                    latest_proto.get("cells")):
+            data_found = latest_proto_data
+            type_of_data_found = LatestReceivedType.GMO
+        elif proto_to_wait_for == ProtoIdentifier.INVENTORY and 'inventory_delta' in latest_proto and \
                 len(latest_proto['inventory_delta']['inventory_items']) > 0:
             type_of_data_found = LatestReceivedType.CLEAR
             data_found = latest_proto
@@ -938,3 +829,70 @@ class WorkerQuests(MITMBase):
                 raise InternalStopWorkerException
         else:
             self._spinnable_data_failcount += 1
+
+    def _check_if_stop_was_nearby_and_update_location(self, gmo_cells):
+        self.logger.info("Checking stops around current location ({}) for deleted stops.", self.current_location)
+        stops: Dict[str, Tuple[Location, datetime]] = self._db_wrapper.get_stop_ids_and_locations_nearby(
+            self.current_location
+        )
+        self.logger.debug("Checking if GMO contains location changes or DB has stops that are already deleted. In DB: "
+                          "{}. GMO cells: {}", str(stops), gmo_cells)
+        # stops may contain multiple stops now. We can check each ID (key of dict) with the IDs in the GMO.
+        # Then cross check against the location. If that differs, we need to update/delete the entries in the DB
+        for cell in gmo_cells:
+            forts: list = cell.get("forts", None)
+            if not forts:
+                continue
+
+            for fort in forts:
+                latitude: float = fort.get("latitude", None)
+                longitude: float = fort.get("longitude", None)
+                fort_id: str = fort.get("id", None)
+                if not latitude or not longitude or not fort_id:
+                    self.logger.warning("Cannot process fort without id, lat or lon")
+                    continue
+                location_last_updated: Tuple[Location, datetime] = stops.get(fort_id)
+                if location_last_updated is None:
+                    # new stop we have not seen before, MITM processors should take care of that
+                    self.logger.debug2("Stop not in DB (in range) with ID {} at {}, {}", fort_id, latitude, longitude)
+                    continue
+                else:
+                    stops.pop(fort_id)
+                stop_location_known, last_updated = location_last_updated
+                if stop_location_known.lat == latitude and stop_location_known.lng == longitude:
+                    # Location of fort has not changed
+                    self.logger.debug2("Fort {} has not moved", fort_id)
+                    continue
+                else:
+                    # now we have a location from DB for the given stop we are currently processing but does not equal
+                    # the one we are currently processing, thus SAME fort_id
+                    # now update the stop
+                    self.logger.warning("Updating fort {} with previous location {} now placed at {}, {}",
+                                        fort_id, str(stop_location_known), latitude, longitude)
+                    self._db_wrapper.update_pokestop_location(fort_id, latitude, longitude)
+
+        timedelta_to_consider_deletion = timedelta(days=3)
+        for fort_id in stops.keys():
+            # Call delete of stops that have been not been found within 100m range of current position
+            stop_location_known, last_updated = stops[fort_id]
+            self.logger.debug("Considering stop {} at {} (last updated {}) for deletion",
+                              fort_id, stop_location_known, last_updated)
+            if last_updated and last_updated > datetime.now() - timedelta_to_consider_deletion:
+                self.logger.info("Stop considered for deletion was last updated recently, not gonna delete it for now.",
+                                 last_updated)
+                continue
+            distance_to_location = get_distance_of_two_points_in_meters(float(stop_location_known.lat),
+                                                                        float(stop_location_known.lng),
+                                                                        float(self.current_location.lat),
+                                                                        float(self.current_location.lng))
+            self.logger.debug("Distance to {} at {} (last updated {})",
+                              fort_id, stop_location_known, last_updated)
+            if distance_to_location < 100:
+                self.logger.warning(
+                    "Deleting stop {} at {} since it could not be found in the GMO but was present in DB and within "
+                    "100m of worker ({}m) and was last updated more than 3 days ago ()",
+                    fort_id, str(stop_location_known), distance_to_location, last_updated)
+                self._db_wrapper.delete_stop(stop_location_known.lat, stop_location_known.lng)
+                self._mapping_manager.routemanager_add_coords_to_be_removed(self._routemanager_name,
+                                                                            stop_location_known.lat,
+                                                                            stop_location_known.lng)

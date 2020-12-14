@@ -1,22 +1,18 @@
 import math
 import time
 from datetime import datetime
-from typing import Union, Tuple, Optional
+from typing import Tuple, Optional
 
 from mapadroid.db.DbWrapper import DbWrapper
 from mapadroid.mitm_receiver.MitmMapper import MitmMapper
 from mapadroid.ocr.pogoWindows import PogoWindows
 from mapadroid.utils import MappingManager
+from mapadroid.utils.ProtoIdentifier import ProtoIdentifier
 from mapadroid.utils.collections import Location
-from mapadroid.utils.geo import (
-    get_distance_of_two_points_in_meters,
-    get_lat_lng_offsets_by_distance
-)
 from mapadroid.utils.madGlobals import InternalStopWorkerException
 from mapadroid.websocket.AbstractCommunicator import AbstractCommunicator
 from mapadroid.worker.MITMBase import MITMBase, LatestReceivedType
 from mapadroid.utils.logging import get_logger, LoggerEnums
-
 
 logger = get_logger(LoggerEnums.worker)
 
@@ -78,16 +74,8 @@ class WorkerMITM(MITMBase):
 
 
     def _move_to_location(self):
-        if not self._mapping_manager.routemanager_present(self._routemanager_name) \
-                or self._stop_worker_event.is_set():
-            raise InternalStopWorkerException
-        routemanager_settings = self._mapping_manager.routemanager_get_settings(self._routemanager_name)
-        # get the distance from our current position (last) to the next gym (cur)
-        distance = get_distance_of_two_points_in_meters(float(self.last_location.lat),
-                                                        float(self.last_location.lng),
-                                                        float(self.current_location.lat),
-                                                        float(self.current_location.lng))
-        self.logger.debug('Moving {} meters to the next position', round(distance, 2))
+        distance, routemanager_settings = self._get_route_manager_settings_and_distance_to_current_location()
+
         if not self._mapping_manager.routemanager_get_init(self._routemanager_name):
             speed = routemanager_settings.get("speed", 0)
             max_distance = routemanager_settings.get("max_distance", None)
@@ -117,48 +105,11 @@ class WorkerMITM(MITMBase):
                 self.logger.debug("Need more sleep after Teleport: {} seconds!", delay_used)
             walk_distance_post_teleport = self.get_devicesettings_value('walk_after_teleport_distance', 0)
             if 0 < walk_distance_post_teleport < distance:
-                # TODO: actually use to_walk for distance
-                lat_offset, lng_offset = get_lat_lng_offsets_by_distance(
-                    walk_distance_post_teleport)
-
-                to_walk = get_distance_of_two_points_in_meters(float(self.current_location.lat),
-                                                               float(
-                                                                   self.current_location.lng),
-                                                               float(
-                                                                   self.current_location.lat) + lat_offset,
-                                                               float(self.current_location.lng) + lng_offset)
-                self.logger.info("Walking roughly: {:.2f}m", to_walk)
-                time.sleep(0.3)
-                self._communicator.walk_from_to(self.current_location,
-                                                Location(self.current_location.lat + lat_offset,
-                                                         self.current_location.lng + lng_offset),
-                                                11)
-                self.logger.debug("Walking back")
-                time.sleep(0.3)
-                self._communicator.walk_from_to(Location(self.current_location.lat + lat_offset,
-                                                self.current_location.lng + lng_offset),
-                                                self.current_location,
-                                                11)
-                self.logger.debug("Done walking")
-                time.sleep(1)
+                self._walk_after_teleport(walk_distance_post_teleport)
         else:
             self.logger.info("main: Walking...")
-            self._transporttype = 1
-            time_before_walk = math.floor(time.time())
-            self._communicator.walk_from_to(self.last_location, self.current_location, speed)
-            # We need to roughly estimate when data could have been available, just picking half way for now, distance
-            # check should do the rest...
-            timestamp_to_use = math.floor(time.time())
-            if timestamp_to_use - 10 < time_before_walk:
-                # duration of walk was rather short, let's go with that...
-                timestamp_to_use = time_before_walk
-            elif math.floor((math.floor(time.time()) + time_before_walk) / 2) < timestamp_to_use - 10:
-                # half way through the walk was earlier than 10s in the past, just gonna go with magic numbers once more
-                timestamp_to_use -= 10
-            else:
-                # half way through was within the last 10s, we can use that to check for data afterwards
-                timestamp_to_use = math.floor((math.floor(time.time()) + time_before_walk) / 2)
-            self.logger.debug2("Done walking, fetching time to sleep")
+            timestamp_to_use = self._walk_to_location(speed)
+
             delay_used = self.get_devicesettings_value('post_walk_delay', 0)
         self.logger.debug2("Sleeping for {}s", delay_used)
         time.sleep(float(delay_used))
@@ -241,11 +192,11 @@ class WorkerMITM(MITMBase):
         self._mitm_mapper.update_latest(origin=self._origin, key="ids_iv", values_dict=ids_iv)
         self._mitm_mapper.update_latest(origin=self._origin, key="injected_settings", values_dict=injected_settings)
 
-    def _check_for_data_content(self, latest_data, proto_to_wait_for: int, timestamp: float) \
+    def _check_for_data_content(self, latest_data, proto_to_wait_for: ProtoIdentifier, timestamp: float) \
             -> Tuple[LatestReceivedType, Optional[object]]:
         type_of_data_found: LatestReceivedType = LatestReceivedType.UNDEFINED
         data_found: Optional[object] = None
-        latest_proto_entry = latest_data.get(proto_to_wait_for, None)
+        latest_proto_entry = latest_data.get(proto_to_wait_for.value, None)
         if not latest_proto_entry:
             self.logger.debug("No data linked to the requested proto since MAD started.")
             return type_of_data_found, data_found
@@ -267,30 +218,11 @@ class WorkerMITM(MITMBase):
         if latest_proto_data is None:
             return LatestReceivedType.UNDEFINED, data_found
         latest_proto = latest_proto_data.get("payload")
-        if mode in ["mon_mitm", "iv_mitm"]:
-            self.logger.debug("Checking GMO for mons")
-            # Now check if there are wild mons...
-            # TODO: Should we check if there are any spawnpoints? Wild mons could not be present in forests etc...
-            amount_of_wild_mons: int = 0
-            for cell in latest_proto['cells']:
-                amount_of_wild_mons += len(cell['wild_pokemon'])
-            if amount_of_wild_mons > 0:
-                data_found = latest_proto
-                type_of_data_found = LatestReceivedType.GMO
-            else:
-                self.logger.debug("No wild mons in GMO")
-        elif mode in ["raids_mitm"]:
-            self.logger.debug("Checking GMO for forts")
-            amount_of_forts: int = 0
-            for cell in latest_proto['cells']:
-                amount_of_forts += len(cell['forts'])
-            if amount_of_forts > 0:
-                data_found = latest_proto
-                type_of_data_found = LatestReceivedType.GMO
-            else:
-                self.logger.debug("No forts in GMO")
+        key_to_check: str = "wild_pokemon" if mode in ["mon_mitm", "iv_mitm"] else "forts"
+        if self._gmo_cells_contain_multiple_of_key(latest_proto, key_to_check):
+            data_found = latest_proto
+            type_of_data_found = LatestReceivedType.GMO
         else:
-            self.logger.warning("No mode specified to wait for - this should not even happen...")
-            time.sleep(0.5)
+            self.logger.info("{} not in GMO", key_to_check)
 
         return type_of_data_found, data_found
