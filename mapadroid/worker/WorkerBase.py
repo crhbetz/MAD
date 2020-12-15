@@ -6,7 +6,7 @@ import time
 from abc import abstractmethod
 from enum import Enum
 from threading import Event, Lock, Thread, current_thread
-from typing import Optional
+from typing import Optional, List
 from mapadroid.db.DbWrapper import DbWrapper
 from mapadroid.mitm_receiver.MitmMapper import MitmMapper
 from mapadroid.ocr.pogoWindows import PogoWindows
@@ -455,6 +455,9 @@ class WorkerBase(AbstractWorker):
                 try:
                     calculate_waits = settings.get("encounter_all", False)
                     while self._wait_again > 0:
+                        # We need to wait for data before we're able to do the calculation, otherwise we have wrong
+                        # or missing data
+                        self._post_move_location_routine(time_snapshot)
                         if calculate_waits:
                             try:
                                 not_encountered: List[int] = []
@@ -466,13 +469,14 @@ class WorkerBase(AbstractWorker):
                                         # positive encounter IDs - calculation taken from DbPogoProtoSubmit.mon()
                                         if encounter_id < 0:
                                             encounter_id = encounter_id + 2 ** 64
-                                        if not encounter_id in encountered:
+                                        if encounter_id not in encountered:
                                             monid = pokemon["pokemon_data"]["id"]
                                             not_encountered.append(monid)
                                 # PD encounters 3 species per GMO
                                 self._wait_again = math.ceil(len(set(not_encountered)) / 3)
-                                self.logger.info("Found {} unique mon IDs - need {} GMOs to get all encounter data",
-                                                    len(set(not_encountered)), self._wait_again)
+                                self.logger.debug("Found {} unique un-encountered mon IDs: {} - requires {} GMOs to "
+                                                  "get all encounter data", len(set(not_encountered)),
+                                                  set(not_encountered), self._wait_again)
                                 # Do not calculate again on subsequent runs of the while loop
                                 calculate_waits = False
                             except Exception:
@@ -480,7 +484,6 @@ class WorkerBase(AbstractWorker):
                                                     "with next location.")
                                 self._wait_again: int = 1
 
-                        self._post_move_location_routine(time_snapshot)
                         self._wait_again -= 1
                         if self._wait_again > 0:
                             self.logger.info("Wait for {} more GMOs for more encounter data", max(self._wait_again, 0))
