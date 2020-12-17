@@ -44,35 +44,6 @@ class WorkerMITM(MITMBase):
             self.logger.warning("Worker failed to retrieve proper data at {}, {}. Worker will continue with "
                                 "the next location", self.current_location.lat, self.current_location.lng)
 
-    def _move_around(self):
-        walk_distance_post_teleport = self.get_devicesettings_value('walk_after_teleport_distance', 0)
-        walk_distance_post_teleport = 15
-
-        # TODO: actually use to_walk for distance
-        self.logger.debug("moving around")
-        lat_offset, lng_offset = get_lat_lng_offsets_by_distance(
-            walk_distance_post_teleport)
-
-        to_walk = get_distance_of_two_points_in_meters(float(self.current_location.lat),
-                                                       float(
-                                                           self.current_location.lng),
-                                                       float(
-                                                           self.current_location.lat) + lat_offset,
-                                                       float(self.current_location.lng) + lng_offset)
-        self.logger.info("Walking roughly: {}", str(to_walk))
-        self._communicator.walk_from_to(Location(self.current_location.lat + lat_offset,
-                                        self.current_location.lng + lng_offset),
-                                        self.current_location,
-                                        50)
-
-        self._communicator.walk_from_to(Location(self.current_location.lat - lat_offset,
-                                        self.current_location.lng + lng_offset),
-                                        self.current_location,
-                                        50)
-
-        self.logger.debug("Done moving around")
-
-
     def _move_to_location(self):
         distance, routemanager_settings = self._get_route_manager_settings_and_distance_to_current_location()
 
@@ -164,6 +135,11 @@ class WorkerMITM(MITMBase):
             scanmode = "nothing"
         injected_settings["scanmode"] = scanmode
 
+        # getting unprocessed stops (without quest)
+        self.unquestStops = self._db_wrapper.stop_from_db_without_quests(
+            self._mapping_manager.routemanager_get_geofence_helper(self._routemanager_name),
+            latlng=False)
+
         # if iv ids are specified we will sync the workers encountered ids to newest time.
         if ids_iv:
             (self._latest_encounter_update, encounter_ids) = self._db_wrapper.update_encounters_from_db(
@@ -190,6 +166,7 @@ class WorkerMITM(MITMBase):
             # encounter_ids only contains the newest update.
         self._mitm_mapper.update_latest(origin=self._origin, key="ids_encountered", values_dict=self._encounter_ids)
         self._mitm_mapper.update_latest(origin=self._origin, key="ids_iv", values_dict=ids_iv)
+        self._mitm_mapper.update_latest(origin=self._origin, key="unquest_stops", values_dict=self.unquestStops)
         self._mitm_mapper.update_latest(origin=self._origin, key="injected_settings", values_dict=injected_settings)
 
     def _check_for_data_content(self, latest_data, proto_to_wait_for: ProtoIdentifier, timestamp: float) \
@@ -223,6 +200,6 @@ class WorkerMITM(MITMBase):
             data_found = latest_proto
             type_of_data_found = LatestReceivedType.GMO
         else:
-            self.logger.info("{} not in GMO", key_to_check)
+            self.logger.debug("{} not in GMO", key_to_check)
 
         return type_of_data_found, data_found

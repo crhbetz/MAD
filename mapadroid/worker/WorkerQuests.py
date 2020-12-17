@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from enum import Enum
 from threading import Event, Thread
-from typing import List, Optional, Tuple, Union, Dict
+from typing import Dict, List, Optional, Tuple, Union
 
 from s2sphere import CellId
 
@@ -16,16 +16,14 @@ from mapadroid.utils.ProtoIdentifier import ProtoIdentifier
 from mapadroid.utils.collections import Location
 from mapadroid.utils.gamemechanicutil import calculate_cooldown
 from mapadroid.utils.geo import get_distance_of_two_points_in_meters
+from mapadroid.utils.logging import LoggerEnums, get_logger
 from mapadroid.utils.madGlobals import (
-    InternalStopWorkerException,
-    WebsocketWorkerRemovedException,
-    WebsocketWorkerTimeoutException,
-    WebsocketWorkerConnectionClosedException
-)
+    InternalStopWorkerException, WebsocketWorkerConnectionClosedException,
+    WebsocketWorkerRemovedException, WebsocketWorkerTimeoutException)
+from mapadroid.utils.ProtoIdentifier import ProtoIdentifier
 from mapadroid.utils.s2Helper import S2Helper
 from mapadroid.websocket.AbstractCommunicator import AbstractCommunicator
-from mapadroid.worker.MITMBase import MITMBase, LatestReceivedType
-from mapadroid.utils.logging import get_logger, LoggerEnums
+from mapadroid.worker.MITMBase import LatestReceivedType, MITMBase
 from mapadroid.worker.WorkerBase import FortSearchResultTypes
 
 # The diff to lat/lng values to consider that the worker is standing on top of the stop
@@ -47,9 +45,6 @@ class WorkerQuests(MITMBase):
 
     def similar(self, elem_a, elem_b):
         return SequenceMatcher(None, elem_a, elem_b).ratio()
-
-    def _move_around(self):
-        pass
 
     def __init__(self, args, dev_id, origin, last_known_state, communicator: AbstractCommunicator,
                  mapping_manager: MappingManager,
@@ -95,7 +90,7 @@ class WorkerQuests(MITMBase):
                 self.get_devicesettings_value('account_rotation_started', False):
             # switch to first account if first started and rotation is activated
             if not self._switch_user():
-                self.logger.error('Something happened while account rotation')
+                self.logger.error('Something happened during account rotation')
                 raise InternalStopWorkerException
             else:
                 reached_main_menu = self._check_pogo_main_screen(10, True)
@@ -369,7 +364,7 @@ class WorkerQuests(MITMBase):
             trashcancheck = self._get_trash_positions()
 
             if trashcancheck is None:
-                self.logger.error('Could not find any trashcans - abort')
+                self.logger.warning('Could not find any trashcans - abort')
                 return
             self.logger.info("Found {} trashcans on screen", len(trashcancheck))
             first_round = False
@@ -387,7 +382,7 @@ class WorkerQuests(MITMBase):
                                                                            check_y_text_ending,
                                                                            check_y_text_starter)
                     if item_text is None:
-                        self.logger.error("Did not get any text in inventory")
+                        self.logger.warning("Did not get any text in inventory")
                         # TODO: could this be running forever?
                         trash += 1
                         continue
@@ -426,10 +421,10 @@ class WorkerQuests(MITMBase):
                                 stop_screen_clear.set()
                                 delete_allowed = True
                             else:
-                                self.logger.warning("Did not receive confirmation of deletion of items in times")
+                                self.logger.warning("Did not receive confirmation of deletion of items in time")
                         else:
-                            self.logger.error('Deletion not confirmed within {}s for item: {}', deletion_timeout,
-                                              item_text)
+                            self.logger.warning('Deletion not confirmed within {}s for item: {}', deletion_timeout,
+                                                item_text)
                             stop_screen_clear.set()
                             stop_inventory_clear.set()
                 except UnicodeEncodeError:
@@ -468,10 +463,11 @@ class WorkerQuests(MITMBase):
             self.logger.debug("No GMO cells passed for surrounding cell check")
             return cells_with_forts
         # 35m radius around current location (thus cells that may be touched by that radius hopefully get included)
-        s2cells_valid_around_location: List[CellId] = S2Helper.get_s2cells_from_circle(self.current_location.lat,
-                                                                                       self.current_location.lng,
-                                                                                       RADIUS_FOR_CELLS_CONSIDERED_FOR_STOP_SCAN,
-                                                                                       S2_GMO_CELL_LEVEL)
+        s2cells_valid_around_location: List[CellId] = \
+            S2Helper.get_s2cells_from_circle(self.current_location.lat,
+                                             self.current_location.lng,
+                                             RADIUS_FOR_CELLS_CONSIDERED_FOR_STOP_SCAN,
+                                             S2_GMO_CELL_LEVEL)
         s2cell_ids_valid: List[str] = [s2cell.id() for s2cell in s2cells_valid_around_location]
         for cell in gmo_cells:
             # each cell contains an array of forts, check each cell for a fort with our current location (maybe +-
@@ -483,8 +479,7 @@ class WorkerQuests(MITMBase):
                 cells_with_forts.append(cell)
 
         if not cells_with_forts:
-            self.logger.warning("GMO cells around current position ({}) do not contain stops ",
-                                self.current_location)
+            self.logger.debug2("GMO cells around current position ({}) do not contain stops ", self.current_location)
         return cells_with_forts
 
     def _current_position_has_spinnable_stop(self, timestamp: float):
@@ -537,13 +532,13 @@ class WorkerQuests(MITMBase):
 
                 enabled: bool = fort.get("enabled", True)
                 if not enabled:
-                    self.logger.warning("Can't spin the stop - it is disabled")
+                    self.logger.info("Can't spin the stop - it is disabled")
                 closed: bool = fort.get("closed", False)
                 if closed:
-                    self.logger.warning("Can't spin the stop - it is closed")
+                    self.logger.info("Can't spin the stop - it is closed")
                 cooldown: int = fort.get("cooldown_complete_ms", 0)
                 if not cooldown == 0:
-                    self.logger.warning("Can't spin the stop - it has cooldown")
+                    self.logger.info("Can't spin the stop - it has cooldown")
                 self._spinnable_data_failcount = 0
                 return fort_type == 1 and enabled and not closed and cooldown == 0, False
         # by now we should've found the stop in the GMO
@@ -692,7 +687,8 @@ class WorkerQuests(MITMBase):
                     return
             elif (type_received == LatestReceivedType.FORT_SEARCH_RESULT
                     and data_received == FortSearchResultTypes.FULL):
-                self.logger.warning("Failed getting quest but got items - quest box is probably full. Start cleanup.")
+                self.logger.warning("Failed getting quest but got items - quest box is probably full. Starting cleanup "
+                                    "routine.")
                 reached_main_menu = self._check_pogo_main_screen(10, True)
                 if not reached_main_menu:
                     if not self._restart_pogo(mitm_mapper=self._mitm_mapper):
@@ -786,9 +782,9 @@ class WorkerQuests(MITMBase):
             self.logger.debug("No proto data for {} at {} after {}", proto_to_wait_for,
                               timestamp_of_proto, timestamp)
         elif proto_to_wait_for == ProtoIdentifier.FORT_SEARCH:
-            quest_type: int = latest_proto.get('challenge_quest', {}) \
-                                     .get('quest', {}) \
-                                     .get('quest_type', False)
+            quest_type: int = latest_proto.get('challenge_quest', {})\
+                .get('quest', {})\
+                .get('quest_type', False)
             result: int = latest_proto.get("result", 0)
             if result == 1 and len(latest_proto.get('items_awarded', [])) == 0:
                 return LatestReceivedType.FORT_SEARCH_RESULT, FortSearchResultTypes.TIME
