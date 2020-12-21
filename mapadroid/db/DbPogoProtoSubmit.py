@@ -4,8 +4,8 @@ import math
 from datetime import datetime, timedelta
 
 from bitstring import BitArray
-from mapadroid.cache import get_cache
 
+from mapadroid.cache import get_cache
 from mapadroid.db.PooledQueryExecutor import PooledQueryExecutor
 from mapadroid.utils.gamemechanicutil import (gen_despawn_timestamp,
                                               is_mon_ditto)
@@ -341,6 +341,7 @@ class DbPogoProtoSubmit:
         :param stop_proto:
         :return:
         """
+        cache = get_cache(self._args)
         logger.debug3("DbPogoProtoSubmit::pokestops_details called")
 
         query_stops = (
@@ -354,7 +355,7 @@ class DbPogoProtoSubmit:
         stop_args = self._extract_args_single_stop_details(stop_proto)
         if stop_args is not None:
             alt_modified_time = int(math.ceil(datetime.utcnow().timestamp() / 1000)) * 1000
-            cache_key = "stopdetail{}{}".format(stop_proto["id"],
+            cache_key = "stopdetail{}{}".format(stop_proto["fort_id"],
                                                 stop_proto.get("last_modified_timestamp_ms", alt_modified_time))
             if cache.exists(cache_key):
                 return
