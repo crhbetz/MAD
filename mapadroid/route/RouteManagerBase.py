@@ -3,7 +3,6 @@ import heapq
 import math
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from datetime import datetime
 from operator import itemgetter
 from threading import Event, RLock, Thread
