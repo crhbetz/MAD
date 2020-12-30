@@ -560,7 +560,8 @@ class RouteManagerBase(ABC):
                 next_timestamp = next_prio[0]
                 next_coord = next_prio[1]
                 next_readable_time = datetime.fromtimestamp(next_timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                self.logger.info('Worker {} getting a closer_heapq prio event {} scheduled for {} ({}s ago)', origin, next_prio, next_readable_time, int(time.time() - next_timestamp))
+                self.logger.info('Worker {} getting a closer_heapq prio event {} scheduled for {} ({}s ago)',
+                                 origin, next_prio, next_readable_time, int(time.time() - next_timestamp))
                 # TODO: Consider if we want to have the following functionality for other modes, too
                 # Problem: delete_seconds_passed = 0 makes sense in _filter_priority_queue_internal,
                 # because it will remove past events only at the moment of prioQ calculation,
@@ -571,23 +572,16 @@ class RouteManagerBase(ABC):
                     else:
                         delete_before = 0
                     if next_timestamp < delete_before:
-                        self.logger.warning("Closer_heapq event for route {} surpassed the "
-                                       "maximum backlog time and will be skipped. "
-                                       "Make sure you run enough workers or reduce "
-                                       "the size of the area! "
-                                       "(event was scheduled for {})",
-                                       self.name, next_readable_time)
+                        route_logger.warning("Closer_heapq event surpassed the maximum backlog time and will be "
+                                             "skipped. Make sure you run enough workers or reduce the size of the "
+                                             "area! (event was scheduled for {})", next_readable_time)
                         return self.get_next_location(origin)
-
-
                 self.__set_routepool_entry_location(origin, next_prio[1])
                 self._routepool[origin].last_round_prio_event = True
-
                 if len(next_prio) > 4:
                     if next_prio[4] > 2:
                         repeats = next_prio[4] // 2 + (next_prio[4] % 2 > 0)
-                        self.logger.debug("Requiring {} times of waiting "
-                                       "for this event", repeats)
+                        self.logger.debug("Requiring {} times of waiting for this event", repeats)
                         return (next_prio[1], repeats)
                 return next_prio[1]
 
@@ -642,8 +636,8 @@ class RouteManagerBase(ABC):
                 self._last_round_prio[origin] = True
                 self._positiontyp[origin] = 1
 
-                route_logger.info("Route {} is moving to {}, {} for a priority event scheduled for {} ({}s ago)",
-                        self.name, next_coord.lat, next_coord.lng, next_readable_time, int(time.time() - next_timestamp))
+                route_logger.info("Moving to {}, {} for a priority event scheduled for {} ({}s ago)", next_coord.lat,
+                                  next_coord.lng, next_readable_time, int(time.time() - next_timestamp))
                 next_coord = self._check_coord_and_maybe_del(next_coord, origin)
                 if next_coord is None:
                     # Coord was not ok, lets recurse
@@ -653,8 +647,7 @@ class RouteManagerBase(ABC):
                 if len(next_prio) > 4:
                     if next_prio[4] > 2:
                         repeats = next_prio[4] // 2 + (next_prio[4] % 2 > 0)
-                        self.logger.debug("Requiring {} times of waiting "
-                                       "for this event", repeats)
+                        self.logger.debug("Requiring {} times of waiting for this event", repeats)
                         return (next_coord, repeats)
                 return next_coord
             # End of if block for prioQ handling.
@@ -799,7 +792,8 @@ class RouteManagerBase(ABC):
         for worker in self._routepool.keys():
             self.logger.debug("trying {} with existing closer_heapq: {}", worker, self._routepool[worker].closer_heapq)
             self.logger.debug2("check if len {} of closer_heapq is bigger than {} / 60 = {}",
-                    len(self._routepool[worker].closer_heapq), self.remove_from_queue_backlog, int(self.remove_from_queue_backlog / 60))
+                               len(self._routepool[worker].closer_heapq), self.remove_from_queue_backlog,
+                               int(self.remove_from_queue_backlog / 60))
             if worker == origin or len(self._routepool[worker].closer_heapq) > int(self.remove_from_queue_backlog / 60):
                 if not worker == origin:
                     self.logger.debug("closer_heapq is full!")
@@ -816,8 +810,7 @@ class RouteManagerBase(ABC):
                 closer_worker = worker
 
         if closer_worker is not None:
-            self.logger.debug("Closer worker {} available, will heappush event {}",
-                          closer_worker, event)
+            self.logger.debug("Closer worker {} available, will heappush event {}", closer_worker, event)
             with self._manager_mutex:
                 heapq.heappush(self._routepool[closer_worker].closer_heapq, event)
             route_logger.debug2("closer_heapq of {}: {}", closer_worker, self._routepool[closer_worker].closer_heapq)

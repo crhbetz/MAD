@@ -35,7 +35,6 @@ def init_logging(args):
     log_level_label, log_level_val = log_level(args.log_level, args.verbose)
     _, log_file_level = log_level(args.log_file_level, args.verbose)
     log_trace = log_level_val <= 10
-    log_file_trace = log_file_level <= 10
     colorize = not args.no_log_colors
 
     log_fmt_time_c = "[<cyan>{time:HH:mm:ss.SS}</cyan>]"
@@ -298,4 +297,3 @@ class LogLevelChanger:
             LogLevelChanger.logger.log(level, msg)
         else:
             LogLevelChanger.logger.opt(depth=6).log("DEBUG5", msg)
-

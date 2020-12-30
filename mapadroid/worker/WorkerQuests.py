@@ -12,7 +12,6 @@ from mapadroid.db.DbWrapper import DbWrapper
 from mapadroid.mitm_receiver.MitmMapper import MitmMapper
 from mapadroid.ocr.pogoWindows import PogoWindows
 from mapadroid.utils import MappingManager
-from mapadroid.utils.ProtoIdentifier import ProtoIdentifier
 from mapadroid.utils.collections import Location
 from mapadroid.utils.gamemechanicutil import calculate_cooldown
 from mapadroid.utils.geo import get_distance_of_two_points_in_meters

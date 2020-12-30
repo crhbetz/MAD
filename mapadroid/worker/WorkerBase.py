@@ -6,7 +6,7 @@ import time
 from abc import abstractmethod
 from enum import Enum
 from threading import Event, Lock, Thread, current_thread
-from typing import Optional, List
+from typing import List, Optional
 
 from mapadroid.db.DbWrapper import DbWrapper
 from mapadroid.mitm_receiver.MitmMapper import MitmMapper
